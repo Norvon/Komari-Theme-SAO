@@ -1666,9 +1666,10 @@
 }
 
 .instance-ping-time-rail {
+  --ping-time-label-width: 148px;
   position: relative;
   height: 32px;
-  margin: 14px 12px 10px;
+  margin: 40px 12px;
   border: 1px solid var(--border-subtle);
   border-radius: 6px;
   background: var(--surface);
@@ -1715,6 +1716,45 @@
 .instance-ping-time-pan:focus-visible {
   outline: 2px solid var(--accent-500);
   outline-offset: 3px;
+}
+
+.instance-ping-time-boundary {
+  position: absolute;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  width: var(--ping-time-label-width);
+  max-width: 100%;
+  padding: 4px 8px;
+  border: 1px solid var(--accent-500);
+  border-radius: 6px;
+  background: var(--surface-elev);
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.5;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+}
+
+/* 短窗口两端很近，起止提示上下错开，避免重叠。 */
+.instance-ping-time-boundary.is-start {
+  bottom: calc(100% + 8px);
+}
+
+.instance-ping-time-boundary.is-end {
+  top: calc(100% + 8px);
+}
+
+.instance-ping-time-rail:hover .instance-ping-time-boundary,
+.instance-ping-time-rail:focus-within .instance-ping-time-boundary,
+.instance-ping-time-rail.is-changing .instance-ping-time-boundary {
+  opacity: 1;
+  visibility: visible;
 }
 
 .instance-ping-window-hint {

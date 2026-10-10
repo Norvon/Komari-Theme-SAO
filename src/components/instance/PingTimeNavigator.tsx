@@ -15,6 +15,8 @@ export function PingTimeNavigator({ navigation }: { navigation: PingChartNavigat
   const span = domain.endMs - domain.startMs;
   const startPercent = (window.startMs - domain.startMs) / span * 100;
   const widthPercent = (window.endMs - window.startMs) / span * 100;
+  const startTime = formatPingWindowTime(window.startMs);
+  const endTime = formatPingWindowTime(window.endMs);
   const move = (event: PointerEvent<HTMLDivElement>) => {
     const drag = dragRef.current;
     if (!drag || drag.pointerId !== event.pointerId || drag.width <= 0) return;
@@ -31,11 +33,11 @@ export function PingTimeNavigator({ navigation }: { navigation: PingChartNavigat
   return (
     <div className="instance-ping-navigator">
       <div className="instance-ping-window-label">
-        <span>{formatPingWindowTime(window.startMs)} — {formatPingWindowTime(window.endMs)}</span>
+        <span>{startTime} — {endTime}</span>
         <button type="button" className="instance-toggle-button" onClick={() => onLatest()}>回到最近 1 天</button>
       </div>
       <div
-        className="instance-ping-time-rail"
+        className={`instance-ping-time-rail${navigation.pending ? " is-changing" : ""}`}
         onPointerDown={(event) => {
           if (event.button !== 0 || dragRef.current) return;
           const target = (event.target as HTMLElement).closest<HTMLElement>("[data-edge]");
@@ -81,11 +83,22 @@ export function PingTimeNavigator({ navigation }: { navigation: PingChartNavigat
               aria-valuemin={edge === "start" ? domain.startMs : window.startMs + Math.min(MIN_PING_WINDOW_MS, span)}
               aria-valuemax={edge === "end" ? domain.endMs : window.endMs - Math.min(MIN_PING_WINDOW_MS, span)}
               aria-valuenow={edge === "start" ? window.startMs : window.endMs}
-              aria-valuetext={formatPingWindowTime(edge === "start" ? window.startMs : window.endMs)}
+              aria-valuetext={edge === "start" ? startTime : endTime}
               onKeyDown={(event) => keyboard(event, edge)}
             />
           ))}
         </div>
+        {(["start", "end"] as const).map((edge) => (
+          <div
+            key={edge}
+            className={`instance-ping-time-boundary is-${edge}`}
+            style={{ left: `clamp(0px, calc(${edge === "start" ? startPercent : startPercent + widthPercent}% - var(--ping-time-label-width) / 2), calc(100% - var(--ping-time-label-width)))` }}
+            aria-hidden="true"
+          >
+            <span>{edge === "start" ? "开始" : "结束"}</span>
+            <time dateTime={new Date(edge === "start" ? window.startMs : window.endMs).toISOString()}>{edge === "start" ? startTime : endTime}</time>
+          </div>
+        ))}
       </div>
       <div className="instance-ping-window-label instance-ping-window-hint">
         <span>{formatPingWindowTime(domain.startMs)}</span><span>{formatPingWindowTime(domain.endMs)}</span>
