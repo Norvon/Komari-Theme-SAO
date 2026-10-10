@@ -1,9 +1,9 @@
 {
-  "name": "komari-theme-sao",
+  "name": "komari-theme-sao-n",
   "private": true,
-  "version": "1.1.4",
+  "version": "1.1.5",
   "type": "module",
-  "description": "Komari-Theme-SAO",
+  "description": "Komari-Theme-SAO-N",
   "author": "WAOR",
   "scripts": {
     "dev": "vite",

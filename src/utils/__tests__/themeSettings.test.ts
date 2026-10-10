@@ -49,6 +49,19 @@ describe("normalizeThemeSettings", () => {
     expect(resolved.homepageMultiPingTaskIds).toEqual([3, 1, 2, 4]);
   });
 
+  it("preserves more than eight multi-ping tasks after a settings round trip", () => {
+    const taskIds = Array.from({ length: 12 }, (_, index) => 12 - index);
+    const settings = normalizeThemeSettings({
+      enableHomepageMultiPing: true,
+      homepageMultiPingTaskIds: taskIds,
+    });
+    const restored = normalizeThemeSettings(JSON.parse(JSON.stringify(settings)));
+
+    expect(settings.homepageMultiPingTaskIds).toEqual(taskIds);
+    expect(restored.enableHomepageMultiPing).toBe(true);
+    expect(restored.homepageMultiPingTaskIds).toEqual(taskIds);
+  });
+
   it("defaults home sort to weight ascending and falls back to a field's natural direction", () => {
     const base = normalizeThemeSettings({});
     expect(base.enableHomeSort).toBe(true);

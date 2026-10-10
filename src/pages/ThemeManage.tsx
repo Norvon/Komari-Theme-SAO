@@ -60,7 +60,6 @@ import {
 } from "@/utils/homeNodes";
 import {
   assignHomepageMultiPingTask,
-  HOMEPAGE_MULTI_PING_MAX_COUNT,
   HOMEPAGE_MULTI_PING_MIN_COUNT,
   isHomepageMultiPingConfigured,
   normalizeHomepageMultiPingTaskIds,
@@ -953,9 +952,8 @@ export function ThemeManage() {
     });
   }, [sortedTasks, taskSearch]);
 
-  const multiPingSlotLimit = Math.min(
-    HOMEPAGE_MULTI_PING_MAX_COUNT,
-    Math.max(sortedTasks.length, HOMEPAGE_MULTI_PING_MIN_COUNT),
+  const canAddMultiPingTask = sortedTasks.some(
+    (task) => !draft.homepageMultiPingTaskIds.includes(task.id),
   );
 
   const commitMultiPingTaskIds = useCallback(
@@ -995,7 +993,6 @@ export function ThemeManage() {
 
   const addMultiPingTask = useCallback(() => {
     commitMultiPingTaskIds((current) => {
-      if (current.length >= HOMEPAGE_MULTI_PING_MAX_COUNT) return current;
       const availableTask = sortedTasks.find((task) => !current.includes(task.id));
       if (!availableTask) return current;
       return [...current, availableTask.id];
@@ -2197,7 +2194,7 @@ function draftToThemeSettings(targetDraft: ThemeDraft): ThemeSettings {
                             卡片将依序渲染这些线路的实时延迟柱条或色块。
                           </p>
                         </div>
-                        {draft.homepageMultiPingTaskIds.length < multiPingSlotLimit && (
+                        {canAddMultiPingTask && (
                           <button
                             type="button"
                             onClick={addMultiPingTask}

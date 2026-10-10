@@ -175,6 +175,30 @@ describe("homepage ping polling selection", () => {
     expect(resolveHomepagePingRequestMode("large", true, [])).toBe("single");
   });
 
+  it("loads every selected task beyond eight and keeps the display order", async () => {
+    const taskIds = Array.from({ length: 12 }, (_, index) => 12 - index);
+    const requestedTaskIds: number[] = [];
+    const result = await buildPingOverviewMap(
+      1,
+      ["node-a"],
+      {},
+      taskIds,
+      undefined,
+      undefined,
+      async (_hours, taskId) => {
+        requestedTaskIds.push(taskId ?? 0);
+        return pingOverviewResponse(taskId ?? 0, (taskId ?? 0) * 10);
+      },
+    );
+
+    expect(requestedTaskIds).toEqual([...taskIds].reverse());
+    expect(result.multiLines.get("node-a")?.map((line) => line.taskId)).toEqual(taskIds);
+    expect(result.multiLines.get("node-a")?.map((line) => line.lastValue)).toEqual(
+      taskIds.map((taskId) => taskId * 10),
+    );
+    expect(result.multiLines.get("node-a")?.every((line) => line.loadState === "ready")).toBe(true);
+  });
+
   it("retains the previous line when one multi-ping task fails", async () => {
     const first = await buildPingOverviewMap(
       1,
