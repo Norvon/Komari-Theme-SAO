@@ -77,16 +77,17 @@ interface TimeRangeOption {
 const TIME_RANGE_OPTIONS: TimeRangeOption[] = [
   { label: "1 小时", value: 1 },
   { label: "4 小时", value: 4 },
+  { label: "8 小时", value: 8 },
+  { label: "12 小时", value: 12 },
   { label: "1 天", value: 24 },
+  { label: "3 天", value: 72 },
+  { label: "5 天", value: 120 },
   { label: "7 天", value: 168 },
+  { label: "14 天", value: 336 },
   { label: "30 天", value: 720 },
+  { label: "60 天", value: 1440 },
+  { label: "90 天", value: 2160 },
 ];
-
-// Ping 详情只保留高分辨率仍有观察价值的四档。metric store 虽可保留更久，
-// 但 30/90 天会退化到小时级 rollup，不再放进详情页快捷范围。
-const PING_TIME_RANGE_OPTIONS: TimeRangeOption[] = TIME_RANGE_OPTIONS.filter(
-  (option) => option.value <= 168,
-);
 
 function formatRangeLabel(hours: number) {
   if (hours % 24 === 0) {
@@ -112,7 +113,7 @@ function buildHistoryRangeOptions(
   const hasExactMatch = resolved.some((option) => option.value === safeMaxHours);
   const largestPreset = presets[presets.length - 1]?.value ?? 0;
 
-  // 保留时间大于前端最长快捷档时，不再把它动态追加成 90 天等超长按钮。
+  // 保留时间大于前端最长快捷档时，不再动态追加更长的按钮。
   // 小于最长档的非标准保留时间仍会显示，避免让用户选到后端已清理的数据范围。
   if (safeMaxHours > 0 && safeMaxHours < largestPreset && !hasExactMatch) {
     resolved.push({
@@ -129,11 +130,7 @@ export function buildLoadTimeRangeOptions(maxHours: number | null | undefined) {
 }
 
 export function buildPingTimeRangeOptions(maxHours: number | null | undefined) {
-  if (!Number.isFinite(maxHours) || !maxHours || maxHours <= 0) {
-    return [...PING_TIME_RANGE_OPTIONS];
-  }
-  const safeMaxHours = Math.floor(maxHours);
-  return PING_TIME_RANGE_OPTIONS.filter((option) => option.value <= safeMaxHours);
+  return buildHistoryRangeOptions(TIME_RANGE_OPTIONS, maxHours, false);
 }
 
 const GRID_CHART_DEFAULT = { w: 320, h: 132 };
