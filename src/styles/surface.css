@@ -1651,9 +1651,93 @@
   margin-top: 16px;
 }
 
+.instance-ping-navigator {
+  margin: 20px 14px 0 54px;
+}
+
+.instance-ping-window-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.instance-ping-time-rail {
+  position: relative;
+  height: 32px;
+  margin: 14px 12px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  background: var(--surface);
+  touch-action: pan-y;
+  user-select: none;
+}
+
+.instance-ping-time-window {
+  position: absolute;
+  top: -1px;
+  height: 32px;
+  border: 1px solid var(--accent-500);
+  background: color-mix(in srgb, var(--accent-500) 18%, transparent);
+}
+
+.instance-ping-time-pan {
+  position: absolute;
+  inset: 0;
+  min-width: 8px;
+  cursor: grab;
+}
+
+.instance-ping-time-handle {
+  position: absolute;
+  top: -5px;
+  width: 12px;
+  height: 40px;
+  border: 1px solid var(--accent-500);
+  border-radius: 4px;
+  background: var(--surface-elev);
+  cursor: ew-resize;
+  touch-action: pan-y;
+}
+
+.instance-ping-time-handle[data-edge="start"] {
+  left: -12px;
+}
+
+.instance-ping-time-handle[data-edge="end"] {
+  right: -12px;
+}
+
+.instance-ping-time-handle:focus-visible,
+.instance-ping-time-pan:focus-visible {
+  outline: 2px solid var(--accent-500);
+  outline-offset: 3px;
+}
+
+.instance-ping-window-hint {
+  margin-top: 8px;
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
+
+@media (max-width: 640px) {
+  .instance-ping-navigator {
+    margin-left: 12px;
+    margin-right: 12px;
+  }
+}
+
 /* 折线入场：从左到右扫出，模拟逐渐画出（canvas 没法逐条 path 动画，用整体揭示近似） */
 .instance-uplot-wrap .uplot {
   animation: chart-reveal 0.7s ease-out;
+}
+
+/* 窗口切换不重复入场，避免裁剪动画遮挡拖拽命中区域。 */
+.instance-uplot-wrap.is-navigable .uplot {
+  animation: none;
 }
 
 @keyframes chart-reveal {

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import UplotReact from "uplot-react";
 import type uPlot from "uplot";
 import { Eye, EyeOff, RefreshCw } from "lucide-react";
@@ -28,6 +28,9 @@ import { reconcilePingMetricStats, resolvePingChartInterval, resolvePingSampleCo
 import { usePreferences } from "@/hooks/usePreferences";
 import type { PingRecord, PingTaskStats } from "@/types/komari";
 import type { TimedMetricPoint } from "./chartData";
+import { HISTORY_HOUR_MS, type PingHistoryWindow } from "@/utils/pingHistoryWindow";
+import { PingTimeNavigator } from "./PingTimeNavigator";
+import { pingNavigationPlugin, type PingChartNavigation } from "./pingNavigation";
 
 interface WeightedLatency {
   value: number;
@@ -105,10 +108,14 @@ export function PingChart({
   uuid,
   hours,
   active = true,
+  range,
+  navigation,
 }: {
   uuid: string;
   hours: number;
   active?: boolean;
+  range?: PingHistoryWindow;
+  navigation?: PingChartNavigation;
 }) {
   const {
     data,
@@ -116,17 +123,37 @@ export function PingChart({
     isError,
     isFetching,
     isLoading,
+    isPlaceholderData,
     refetch: refetchRecords,
-  } = usePingRecords(uuid, hours, active);
+  } = usePingRecords(uuid, hours, active, range);
   const auxiliaryEnabled = active && Boolean(uuid);
-  const { data: serverStats, refetch: refetchStats } = usePingRecordStats(uuid, hours, auxiliaryEnabled);
+  const { data: serverStats, refetch: refetchStats } = usePingRecordStats(uuid, hours, auxiliaryEnabled, range);
   const { data: publicTasks, refetch: refetchTasks } = usePublicPingTasks(auxiliaryEnabled && Boolean(data?.records.length));
+  const dataMatchesWindow = !range || (data?.rangeStartMs === range.startMs && data?.rangeEndMs === range.endMs);
   const pingStats = useMemo(
-    () => reconcilePingMetricStats(serverStats ?? data?.stats ?? EMPTY_PING_STATS, data?.records ?? []),
-    [data, serverStats],
+    () => reconcilePingMetricStats((dataMatchesWindow ? serverStats : undefined) ?? data?.stats ?? EMPTY_PING_STATS, data?.records ?? []),
+    [data, dataMatchesWindow, serverStats],
   );
   const { resolvedAppearance } = usePreferences();
   const { w, h, ref: chartSizeRef } = useResponsiveChartSize("wide");
+  const navigationRef = useRef(navigation);
+  navigationRef.current = navigation;
+  const navigationEnabled = Boolean(navigation);
+  const navigationPlugin = useMemo(() => pingNavigationPlugin(() => navigationRef.current), []);
+  const plotRef = useRef<uPlot | null>(null);
+  const onCreate = useCallback((plot: uPlot) => {
+    plotRef.current = plot;
+    const window = navigationRef.current?.window;
+    if (window) plot.setScale("x", { min: window.startMs / 1000, max: window.endMs / 1000 });
+  }, []);
+  const onDelete = useCallback((plot: uPlot) => {
+    if (plotRef.current === plot) plotRef.current = null;
+  }, []);
+  useEffect(() => {
+    if (navigation && plotRef.current) {
+      plotRef.current.setScale("x", { min: navigation.window.startMs / 1000, max: navigation.window.endMs / 1000 });
+    }
+  }, [navigation]);
   const [hiddenTasks, setHiddenTasks] = useState<Set<number>>(new Set());
   const [connectNulls, setConnectNulls] = useState(false);
   const [cutPeak, setCutPeak] = useState(false);
@@ -260,20 +287,21 @@ export function PingChart({
       chartPoints.map((point) => point[taskKey]),
     );
 
-    const reduced = downsampleAligned(times, perTask, MAX_RENDER_POINTS, !cutPeak);
+    const reduced = downsampleAligned(times, perTask, navigationEnabled ? 2000 : MAX_RENDER_POINTS, !cutPeak);
     const smoothed = smoothByCount(
       reduced.perTask,
       cutPeak ? SMOOTH_WINDOW_POINTS_PEAK : SMOOTH_WINDOW_POINTS,
     );
 
     return [reduced.times, ...smoothed] as uPlot.AlignedData;
-  }, [cutPeak, data, sortedRecords, taskKeySet, taskKeys, tasks]);
+  }, [cutPeak, data, navigationEnabled, sortedRecords, taskKeySet, taskKeys, tasks]);
 
   useEffect(() => {
     if (chart) chartRef.current = chart;
   }, [chart]);
 
-  const requestedXRange = useMemo(() => historyChartRangeSeconds(data), [data]);
+  const requestedXRange = useMemo(() => navigationEnabled ? null : historyChartRangeSeconds(data), [data, navigationEnabled]);
+  const optionHours = navigationEnabled ? 90 * 24 : hours;
   const coverageMeta = useMemo(() => {
     if (!data) return null;
     const taskIntervals = tasks
@@ -322,7 +350,7 @@ export function PingChart({
     const { grid, text } = getAxisColors(isDark);
     const tooltipHooks = buildChartTooltipHooks({
       dataRef: chartRef,
-      rangeHours: hours,
+      rangeHours: optionHours,
       estimatedWidth: 196,
       setTooltip,
       buildRows: (idx) =>
@@ -349,10 +377,16 @@ export function PingChart({
     });
     return {
       padding: [10, 14, 12, 2],
-      cursor: { drag: { x: true, y: false } },
+      cursor: { drag: { x: !navigationEnabled, y: false, setScale: !navigationEnabled } },
+      plugins: navigationEnabled ? [navigationPlugin] : [],
       legend: { show: false },
       scales: {
-        x: requestedXRange
+        x: navigationEnabled
+          ? { time: true, auto: false, range: (_plot, min, max) => [
+            min ?? navigationRef.current!.window.startMs / 1000,
+            max ?? navigationRef.current!.window.endMs / 1000,
+          ] }
+          : requestedXRange
           ? { time: true, auto: false, range: () => requestedXRange }
           : { time: true },
         y: { auto: false, range: yRange },
@@ -363,7 +397,11 @@ export function PingChart({
           grid: { stroke: grid, width: 1 },
           ticks: { stroke: grid },
           size: 36,
-          values: createTimeAxisFormatter(hours),
+          values: (plot, splits) => {
+            const window = navigationRef.current?.window;
+            const axisHours = window ? (window.endMs - window.startMs) / HISTORY_HOUR_MS : optionHours;
+            return createTimeAxisFormatter(axisHours)(plot, splits);
+          },
         },
         {
           stroke: text,
@@ -396,7 +434,7 @@ export function PingChart({
         setCursor: [tooltipHooks.onSetCursor],
       },
     };
-  }, [chart, connectNulls, hiddenTasks, hours, isDark, requestedXRange, taskColors, taskIndexById, taskLabels, tasks, visibleTasks, yRange]);
+  }, [chart, connectNulls, hiddenTasks, isDark, navigationEnabled, navigationPlugin, optionHours, requestedXRange, taskColors, taskIndexById, taskLabels, tasks, visibleTasks, yRange]);
 
   const options = useMemo<uPlot.Options | null>(
     () => (baseOptions ? { ...baseOptions, width: w, height: h } : null),
@@ -460,6 +498,10 @@ export function PingChart({
   }, [pingStats, sortedRecords, taskColors, tasks, uuid]);
 
   const refetchAll = () => {
+    if (navigation && navigation.window.endMs === navigation.domain.endMs) {
+      navigation.onLatest((navigation.window.endMs - navigation.window.startMs) / HISTORY_HOUR_MS);
+      return;
+    }
     void refetchRecords();
     if (auxiliaryEnabled) {
       void refetchStats();
@@ -480,6 +522,17 @@ export function PingChart({
     setHiddenTasks((prev) => (prev.size === 0 ? new Set(tasks.map((task) => task.id)) : new Set()));
   };
 
+  const timeNavigator = navigation ? <PingTimeNavigator navigation={navigation} /> : null;
+
+  if (isLoading && navigation) {
+    return (
+      <InstancePanel title="Ping 图表">
+        <div className="instance-chart-loading" aria-busy>正在加载所选时间范围…</div>
+        {timeNavigator}
+      </InstancePanel>
+    );
+  }
+
   if (isLoading) {
     return <InstanceChartLoading title="Ping 图表" />;
   }
@@ -499,6 +552,7 @@ export function PingChart({
             {isFetching ? "重试中" : "重试"}
           </button>
         </div>
+        {timeNavigator}
       </InstancePanel>
     );
   }
@@ -506,13 +560,19 @@ export function PingChart({
   if (!data?.records.length) {
     return (
       <InstancePanel title="Ping 图表">
-        <div className="instance-empty">暂无延迟记录</div>
+        <div className="instance-empty">{navigation
+          ? navigation.pending || isFetching || !dataMatchesWindow ? "正在加载所选时间范围…" : "所选时间范围暂无延迟记录"
+          : "暂无延迟记录"}</div>
+        {timeNavigator}
       </InstancePanel>
     );
   }
 
   return (
-    <InstancePanel title="Ping 图表" description={coverageLabel ?? undefined}>
+    <InstancePanel title="Ping 图表" description={navigation && (navigation.pending || !dataMatchesWindow) ? undefined : coverageLabel ?? undefined}>
+      {navigation && (navigation.pending || isPlaceholderData || !dataMatchesWindow) && (
+        <p className="instance-ping-window-hint" role="status">正在加载所选时间范围；线路统计暂为上次结果。</p>
+      )}
       <div className="instance-ping-toolbar">
         <SwitchToggle
           label="削峰平滑"
@@ -585,13 +645,15 @@ export function PingChart({
         })}
       </div>
 
-      <div ref={chartSizeRef} className="instance-uplot-wrap is-large">
+      <div ref={chartSizeRef} className={`instance-uplot-wrap is-large${navigationEnabled ? " is-navigable" : ""}`}>
         {chart && options && visibleTasks.length > 0 ? (
           <>
             <UplotReact
-              key={`${uuid}-${hours}-${cutPeak ? "smooth" : "raw"}-${connectNulls ? "span" : "gap"}`}
+              key={`${uuid}-${navigationEnabled ? "window" : hours}-${cutPeak ? "smooth" : "raw"}-${connectNulls ? "span" : "gap"}`}
               options={options}
               data={chart}
+              onCreate={onCreate}
+              onDelete={onDelete}
             />
             <ChartTooltip tooltip={tooltip} />
           </>
@@ -599,6 +661,7 @@ export function PingChart({
           <div className="instance-empty">当前已隐藏全部线路，点击上方按钮可恢复显示</div>
         )}
       </div>
+      {timeNavigator}
     </InstancePanel>
   );
 }

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { getRpc2Client, RpcResponseError } from "@/services/rpc2Client";
-import { HttpRequestError, isAccessDeniedError } from "@/services/requestErrors";
+import { HistoryWindowUnsupportedError, HttpRequestError, isAccessDeniedError } from "@/services/requestErrors";
+import { pingWindowContains, pingWindowParams, type PingHistoryWindow } from "@/utils/pingHistoryWindow";
 import {
   MeSchema,
   NodeInfoSchema,
@@ -168,6 +169,7 @@ interface LoadRecordsOptions extends ApiCallOptions {
 interface PingRecordsOptions extends ApiCallOptions {
   includeStats?: boolean;
   includeTasks?: boolean;
+  range?: PingHistoryWindow;
 }
 
 interface PingOverviewOptions extends ApiCallOptions {
@@ -239,6 +241,27 @@ function createRequestRange(hours: number, now = Date.now()): RequestRange {
     rangeStartMs: now - safeHours * 60 * 60 * 1000,
     rangeEndMs: now,
   };
+}
+
+function assertPingWindowResponse(range: PingHistoryWindow | undefined, start: unknown, end: unknown) {
+  if (!range) return;
+  // 必须核对服务端回传范围，避免旧后端忽略 start/end 后展示错段。
+  if (typeof start !== "string" || typeof end !== "string" ||
+    !(Math.abs(Date.parse(start) - range.startMs) <= 1000) ||
+    !(Math.abs(Date.parse(end) - range.endMs) <= 1000)) {
+    throw new HistoryWindowUnsupportedError();
+  }
+}
+
+function matchingPingStats(payload: z.output<typeof PingMetricStatsResponseSchema> | null, range?: PingHistoryWindow) {
+  if (!payload || !range) return payload;
+  try {
+    assertPingWindowResponse(range, payload.start, payload.end);
+    return payload;
+  } catch {
+    warnDegradedOnce("ping-stats-window", "Ping 统计未返回所选时间范围,已由曲线样本兜底计算");
+    return null;
+  }
 }
 
 function getMetricPayloadRange(
@@ -822,6 +845,7 @@ async function getPingMetricData({
   includeStats = false,
   includeTasks = true,
   repairBoundary = false,
+  range,
   signal,
   timeout,
 }: {
@@ -832,6 +856,7 @@ async function getPingMetricData({
   includeStats?: boolean;
   includeTasks?: boolean;
   repairBoundary?: boolean;
+  range?: PingHistoryWindow;
   signal?: AbortSignal;
   timeout?: number;
 }): Promise<PingRecordsResponse> {
@@ -844,9 +869,12 @@ async function getPingMetricData({
     throw new MetricApiUnavailableError();
   }
 
-  const requestRange = createRequestRange(hours);
+  const requestRange = range
+    ? { rangeStartMs: range.startMs, rangeEndMs: range.endMs }
+    : createRequestRange(hours);
   const commonParams = {
     hours,
+    ...pingWindowParams(range),
     ...(entityIds?.length ? { entity_ids: entityIds } : {}),
     ...(taskId != null ? { task_id: taskId } : {}),
     max_points: maxPoints,
@@ -881,6 +909,7 @@ async function getPingMetricData({
       return null;
     }) : Promise.resolve(publicPingTasksCache),
   ]);
+  assertPingWindowResponse(range, metricPayload.start, metricPayload.end);
   let series: PingMetricSeries[] = metricPayload.series.map((item) => ({
     metricKey: item.metric_key,
     client: item.entity_id,
@@ -910,9 +939,10 @@ async function getPingMetricData({
       remainingRequestTimeout(deadline),
     );
   }
-  const records = mergePingMetricSeries(series);
+  const records = mergePingMetricSeries(series).filter((record) => !range || pingWindowContains(range, record.time));
+  const matchingStats = matchingPingStats(statsPayload, range);
   const stats = reconcilePingMetricStats(
-    statsPayload ? normalizePingMetricStats(statsPayload) : [],
+    matchingStats ? normalizePingMetricStats(matchingStats) : [],
     records,
   );
   const intervalSeconds = Math.max(
@@ -934,7 +964,7 @@ async function getPingMetricData({
   return {
     count: records.length,
     records,
-    ...getMetricPayloadRange(metricPayload, requestRange),
+    ...(range ? requestRange : getMetricPayloadRange(metricPayload, requestRange)),
     intervalSeconds: intervalSeconds > 0 ? intervalSeconds : undefined,
     tasks:
       tasks && tasks.length > 0
@@ -1134,15 +1164,17 @@ export async function getTodayTrafficMetrics(
 export function getPingStats(
   uuid: string,
   hours = 6,
-  options?: ApiCallOptions,
+  options?: ApiCallOptions & { range?: PingHistoryWindow },
 ): Promise<PingTaskStats[]> {
   return runHistoryRequest(options, async (bounded) => {
     const payload = await queryPingMetricStatsPayload({
       hours,
+      ...pingWindowParams(options?.range),
       entity_ids: [uuid],
       max_points: DETAIL_METRIC_MAX_POINTS,
     }, bounded);
-    return payload ? normalizePingMetricStats(payload) : [];
+    const matchingStats = matchingPingStats(payload, options?.range);
+    return matchingStats ? normalizePingMetricStats(matchingStats) : [];
   });
 }
 
@@ -1161,7 +1193,10 @@ async function pingRecordsWithFallback(
   hours = 6,
   options?: PingRecordsOptions,
 ): Promise<PingRecordsResponse> {
-  const requestRange = createRequestRange(hours);
+  const timeParams = pingWindowParams(options?.range);
+  const requestRange = options?.range
+    ? { rangeStartMs: options.range.startMs, rangeEndMs: options.range.endMs }
+    : createRequestRange(hours);
   try {
     // 默认保持原调用契约；详情页可关闭辅助请求，让曲线先返回。
     return await getPingMetricData({
@@ -1170,6 +1205,7 @@ async function pingRecordsWithFallback(
       maxPoints: DETAIL_METRIC_MAX_POINTS,
       includeStats: options?.includeStats ?? true,
       includeTasks: options?.includeTasks ?? true,
+      range: options?.range,
       signal: options?.signal,
       timeout: options?.timeout,
     });
@@ -1190,16 +1226,26 @@ async function pingRecordsWithFallback(
       "common:getRecords",
       {
         uuid,
-        hours,
+        hours: options?.range ? Math.ceil(hours) : hours,
+        ...timeParams,
         type: "ping",
         maxCount,
       },
       RpcRecordsSchema,
       options,
     );
-    return normalizeRpcPingRecords(uuid, payload, requestRange);
+    assertPingWindowResponse(options?.range, payload.from, payload.to);
+    const result = normalizeRpcPingRecords(uuid, payload, requestRange);
+    if (!options?.range) return result;
+    const records = result.records.filter((record) => pingWindowContains(options.range!, record.time));
+    return { ...result, records, count: records.length };
   } catch (error) {
     if (options?.signal?.aborted || isAccessDeniedError(error)) throw error;
+    // 旧 HTTP 路径未确认支持绝对窗口，不能冒充用户选中的历史时间。
+    if (options?.range) {
+      if (isMissingMetricMethod(error)) throw new HistoryWindowUnsupportedError();
+      throw error;
+    }
     const legacy = (await apiGet(
       `/api/records/ping?${new URLSearchParams({ uuid, hours: String(hours) })}`,
       z.object({

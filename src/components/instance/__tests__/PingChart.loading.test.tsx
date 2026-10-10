@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { HttpRequestError } from "@/services/requestErrors";
+import { latestPingWindow, pingHistoryDomain } from "@/utils/pingHistoryWindow";
 
 const { recordsMock, statsMock, tasksMock } = vi.hoisted(() => ({
   recordsMock: vi.fn(), statsMock: vi.fn(), tasksMock: vi.fn(),
@@ -81,4 +82,32 @@ describe("Ping progressive rendering", () => {
     expect(markup).toContain("刷新失败，重试");
   });
 
+  it("keeps navigation available during initial loading, errors and empty windows", () => {
+    const domain = pingHistoryDomain(Date.parse("2026-10-10T01:00:00Z"));
+    const range = latestPingWindow(domain);
+    const navigation = { domain, window: range, pending: false, onChange: vi.fn(), onLatest: vi.fn() };
+    for (const result of [
+      { isLoading: true },
+      { isError: true, error: new Error("offline") },
+      { data: { count: 0, records: [], tasks: [], rangeStartMs: range.startMs, rangeEndMs: range.endMs } },
+    ]) {
+      recordsMock.mockReturnValue({ isLoading: false, isError: false, isFetching: false, refetch: vi.fn(), ...result });
+      const markup = renderToStaticMarkup(<PingChart uuid="node-a" hours={24} range={range} navigation={navigation} />);
+      expect(markup).toContain("回到最近 1 天");
+      expect(markup).toContain('aria-label="Ping 开始时间"');
+      expect(markup).toContain('aria-label="Ping 结束时间"');
+    }
+  });
+
+  it("forwards the selected window and labels retained data while the next window loads", () => {
+    const domain = pingHistoryDomain(Date.parse("2026-10-10T01:00:00Z"));
+    const range = latestPingWindow(domain);
+    const navigation = { domain, window: range, pending: true, onChange: vi.fn(), onLatest: vi.fn() };
+    recordsMock.mockReturnValue({ data, isPlaceholderData: true, isFetching: true, refetch: vi.fn() });
+    const markup = renderToStaticMarkup(<PingChart uuid="node-a" hours={24} range={range} navigation={navigation} />);
+    expect(recordsMock).toHaveBeenCalledWith("node-a", 24, true, range);
+    expect(statsMock).toHaveBeenCalledWith("node-a", 24, true, range);
+    expect(markup).toContain("线路统计暂为上次结果");
+    expect(markup).toContain('data-chart="ready"');
+  });
 });

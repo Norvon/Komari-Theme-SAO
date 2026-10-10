@@ -13,7 +13,15 @@ export function isAccessDeniedError(error: unknown) {
   return error instanceof HttpRequestError && [401, 403].includes(error.status);
 }
 
+export class HistoryWindowUnsupportedError extends Error {
+  constructor() {
+    super("当前服务端不支持指定时间窗口，请升级 Komari 后重试");
+    this.name = "HistoryWindowUnsupportedError";
+  }
+}
+
 export function historyRequestErrorMessage(error: unknown, fallback: string) {
+  if (error instanceof HistoryWindowUnsupportedError) return error.message;
   if (error instanceof HttpRequestError && error.status === 401) {
     return "登录状态已失效，请重新登录后重试";
   }

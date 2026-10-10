@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { queryClient } from "@/services/queryClient";
-import { HttpRequestError, historyRequestErrorMessage } from "@/services/requestErrors";
+import { HistoryWindowUnsupportedError, HttpRequestError, historyRequestErrorMessage } from "@/services/requestErrors";
 
 describe("request error policy", () => {
   const retry = queryClient.getDefaultOptions().queries?.retry;
@@ -22,6 +22,12 @@ describe("request error policy", () => {
     const error = new HttpRequestError("unavailable", 503, "/api/rpc2");
     expect(canRetry(error)).toBe(true);
     expect(canRetry(error, 1)).toBe(false);
+  });
+
+  it("does not retry an unsupported absolute history window", () => {
+    const error = new HistoryWindowUnsupportedError();
+    expect(canRetry(error)).toBe(false);
+    expect(historyRequestErrorMessage(error, "failed")).toContain("升级 Komari");
   });
 
   it("explains login, permission and timeout failures", () => {

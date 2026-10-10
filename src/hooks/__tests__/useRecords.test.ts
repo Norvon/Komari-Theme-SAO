@@ -47,4 +47,21 @@ describe("chart query wiring", () => {
     expect(queryMock.mock.calls[0][0].queryKey).toEqual(["public-ping-tasks"]);
   });
 
+  it("uses absolute windows for both queries and never carries another node's curve", async () => {
+    const range = { startMs: 1_000, endMs: 61_000 };
+    usePingRecords("node-a", 1 / 60, true, range);
+    usePingRecordStats("node-a", 1 / 60, true, range);
+    const curve = queryMock.mock.calls[0][0];
+    const stats = queryMock.mock.calls[1][0];
+    const signal = new AbortController().signal;
+    await curve.queryFn({ signal });
+    await stats.queryFn({ signal });
+    expect(curve.queryKey).toEqual(["records", "ping", "node-a", 1 / 60, 1_000, 61_000]);
+    expect(stats.queryKey).toEqual(["records", "ping-stats", "node-a", 1 / 60, 1_000, 61_000]);
+    expect(pingMock).toHaveBeenCalledWith("node-a", 1 / 60, { signal, range, includeStats: false, includeTasks: false });
+    expect(statsMock).toHaveBeenCalledWith("node-a", 1 / 60, { signal, range });
+    const previous = { records: [] };
+    expect(curve.placeholderData(previous, { queryKey: ["records", "ping", "node-a"] })).toBe(previous);
+    expect(curve.placeholderData(previous, { queryKey: ["records", "ping", "node-b"] })).toBeUndefined();
+  });
 });

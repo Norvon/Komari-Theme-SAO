@@ -1,7 +1,8 @@
 import { QueryClient } from "@tanstack/react-query";
-import { HttpRequestError } from "@/services/requestErrors";
+import { HistoryWindowUnsupportedError, HttpRequestError } from "@/services/requestErrors";
 
 function shouldRetry(failureCount: number, error: unknown) {
+  if (error instanceof HistoryWindowUnsupportedError) return false;
   if (error instanceof Error && ["AbortError", "TimeoutError"].includes(error.name)) {
     return false;
   }

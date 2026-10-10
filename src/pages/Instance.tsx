@@ -13,8 +13,8 @@ import {
 import { usePublicConfig } from "@/hooks/usePublicConfig";
 import { useNodeMeta, useNodeStoreStatus } from "@/hooks/useNode";
 import { useThemeSettings } from "@/hooks/useThemeSettings";
+import { usePingHistoryWindow } from "@/hooks/usePingHistoryWindow";
 
-const DEFAULT_PING_HOURS = 4;
 type TimeRangeOption = ReturnType<typeof buildLoadTimeRangeOptions>[number];
 
 function RangeSelector({
@@ -51,7 +51,6 @@ export function Instance() {
   const storeStatus = useNodeStoreStatus(Boolean(uuid));
   const [chartType, setChartType] = useState<"load" | "ping">("load");
   const [loadHours, setLoadHours] = useState(0);
-  const [pingHours, setPingHours] = useState(DEFAULT_PING_HOURS);
   const chartControlsRef = useRef<HTMLDivElement | null>(null);
 
   const metricRetentionHours =
@@ -67,6 +66,7 @@ export function Instance() {
     () => buildPingTimeRangeOptions(metricRetentionHours ?? config?.ping_record_preserve_time),
     [config?.ping_record_preserve_time, metricRetentionHours],
   );
+  const pingNavigation = usePingHistoryWindow(uuid ?? "", pingRanges[pingRanges.length - 1]?.value ?? 2160);
   const showPingChart = themeSettings.isReady && themeSettings.showPingChart;
 
   const alignCharts = useCallback(() => {
@@ -85,16 +85,6 @@ export function Instance() {
       setLoadHours(loadRanges[0]?.value ?? 0);
     }
   }, [loadHours, loadRanges]);
-
-  useEffect(() => {
-    if (!pingRanges.some((range) => range.value === pingHours)) {
-      setPingHours(
-        pingRanges.find((range) => range.value === DEFAULT_PING_HOURS)?.value ??
-          pingRanges[0]?.value ??
-          DEFAULT_PING_HOURS,
-      );
-    }
-  }, [pingHours, pingRanges]);
 
   useEffect(() => {
     if (!showPingChart && chartType === "ping") {
@@ -177,8 +167,8 @@ export function Instance() {
         {chartType === "ping" && showPingChart && (
           <RangeSelector
             ranges={pingRanges}
-            value={pingHours}
-            onChange={(value) => startTransition(() => setPingHours(value))}
+            value={pingNavigation.selectedHours}
+            onChange={(value) => startTransition(() => pingNavigation.onLatest(value))}
           />
         )}
       </div>
@@ -198,7 +188,9 @@ export function Instance() {
           {showPingChart ? (
             <PingChart
               uuid={uuid}
-              hours={pingHours}
+              hours={pingNavigation.queryHours}
+              range={pingNavigation.queryWindow}
+              navigation={pingNavigation}
               active={chartType === "ping"}
             />
           ) : null}
