@@ -2,9 +2,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { HttpRequestError } from "@/services/requestErrors";
 import { latestPingWindow, pingHistoryDomain } from "@/utils/pingHistoryWindow";
+import type { ComponentProps } from "react";
+import type UplotReact from "uplot-react";
 
-const { recordsMock, statsMock, tasksMock } = vi.hoisted(() => ({
-  recordsMock: vi.fn(), statsMock: vi.fn(), tasksMock: vi.fn(),
+const { recordsMock, statsMock, tasksMock, chartMock } = vi.hoisted(() => ({
+  recordsMock: vi.fn(), statsMock: vi.fn(), tasksMock: vi.fn(), chartMock: vi.fn(),
 }));
 
 vi.mock("@/hooks/useRecords", () => ({
@@ -13,7 +15,7 @@ vi.mock("@/hooks/useRecords", () => ({
 vi.mock("@/hooks/usePreferences", () => ({
   usePreferences: () => ({ resolvedAppearance: "dark" }),
 }));
-vi.mock("uplot-react", () => ({ default: () => <div data-chart="ready" /> }));
+vi.mock("uplot-react", () => ({ default: chartMock }));
 vi.mock("@/components/instance/chartShared", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/components/instance/chartShared")>(),
   useResponsiveChartSize: () => ({ w: 800, h: 300, ref: { current: null } }),
@@ -34,6 +36,7 @@ const data = {
 describe("Ping progressive rendering", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    chartMock.mockImplementation(() => <div data-chart="ready" />);
     recordsMock.mockReturnValue({ data, isError: false, isLoading: false, isFetching: false, refetch: vi.fn() });
     statsMock.mockReturnValue({ data: undefined, isFetching: true, refetch: vi.fn() });
     tasksMock.mockReturnValue({ data: undefined, isFetching: true, refetch: vi.fn() });
@@ -109,5 +112,40 @@ describe("Ping progressive rendering", () => {
     expect(statsMock).toHaveBeenCalledWith("node-a", 24, true, range);
     expect(markup).toContain("线路统计暂为上次结果");
     expect(markup).toContain('data-chart="ready"');
+  });
+
+  it.each([60, 300, 900, 3600])("preserves a missing %i-second bucket with gap connection off", (intervalSeconds) => {
+    const start = Date.parse("2026-10-10T00:00:00Z");
+    recordsMock.mockReturnValue({ data: {
+      ...data, intervalSeconds, records: [
+        { ...data.records[0], time: new Date(start).toISOString() },
+        { ...data.records[0], time: new Date(start + intervalSeconds * 2000).toISOString() },
+      ],
+    }, refetch: vi.fn() });
+
+    const markup = renderToStaticMarkup(<PingChart uuid="node-a" hours={24} />);
+    const props = chartMock.mock.calls[0][0] as ComponentProps<typeof UplotReact>;
+
+    expect(props.options.series[1].spanGaps).toBe(false);
+    expect(props.data[0]).toEqual([start / 1000, start / 1000 + intervalSeconds, start / 1000 + intervalSeconds * 2]);
+    expect(props.data[1]).toEqual([20, null, 20]);
+    expect(markup).toContain("曲线空白表示缺采样或丢包");
+    expect(markup).not.toContain("小空缺始终自动桥接");
+  });
+
+  it("keeps normal aggregate buckets connected without mistaking the task interval for the bucket interval", () => {
+    recordsMock.mockReturnValue({ data: {
+      ...data, intervalSeconds: 900, records: [
+        { ...data.records[0], time: "2026-10-10T00:00:00Z" },
+        { ...data.records[0], time: "2026-10-10T00:15:00Z" },
+        { ...data.records[0], time: "2026-10-10T00:30:00Z" },
+      ],
+    }, refetch: vi.fn() });
+
+    renderToStaticMarkup(<PingChart uuid="node-a" hours={24} />);
+    const props = chartMock.mock.calls[0][0] as ComponentProps<typeof UplotReact>;
+
+    expect(props.options.series[1].spanGaps).toBe(false);
+    expect(props.data[1]).toEqual([20, 20, 20]);
   });
 });

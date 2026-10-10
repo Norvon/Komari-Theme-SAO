@@ -584,7 +584,7 @@ export function PingChart({
           label="断点连线"
           active={connectNulls}
           onToggle={() => setConnectNulls((value) => !value)}
-          title="关闭：如实显示中断/丢包断点；开启：跨过所有空缺连成完整曲线（更好看，但看不出掉线）。注：偶尔漏一两次采样的小空缺始终自动桥接，不受此开关影响。"
+          title="关闭：超过采样周期及时间容差的缺采样和丢包保留断点；开启：跨过这些空缺连线。缺采样不等同于已确认离线，聚合桶内的短时中断可能无法显示。"
         />
         <button type="button" className="instance-toggle-button" onClick={toggleAll}>
           {hiddenTasks.size === 0 ? <EyeOff size={14} aria-hidden /> : <Eye size={14} aria-hidden />}
@@ -601,6 +601,12 @@ export function PingChart({
           {isFetching ? "刷新中" : isError ? "刷新失败，重试" : "刷新"}
         </button>
       </div>
+
+      <p className="instance-ping-window-hint">
+        {connectNulls
+          ? "已开启断点连线，曲线会跨过缺采样和丢包，不能据此判断持续在线。"
+          : "曲线空白表示缺采样或丢包，不等同于已确认离线；聚合桶内的短时中断可能无法显示，可尝试缩小时间范围查看。"}
+      </p>
 
       <div className="instance-ping-tasks">
         {taskStats.map((task) => {
