@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import UplotReact from "uplot-react";
 import type uPlot from "uplot";
 import { Eye, EyeOff, RefreshCw } from "lucide-react";
-import { usePingRecords } from "@/hooks/useRecords";
+import { usePingRecords, usePingRecordStats, usePublicPingTasks } from "@/hooks/useRecords";
+import { historyRequestErrorMessage } from "@/services/requestErrors";
 import { InstancePanel, InstanceChartLoading } from "./InstancePanel";
 import {
   buildChartTooltipHooks,
@@ -23,7 +24,7 @@ import {
 } from "./chartData";
 import { latencyHeatColor, lossHeatColor } from "@/utils/metricTone";
 import { historyChartRangeSeconds, historyCoverageLabel } from "@/utils/historyRange";
-import { resolvePingChartInterval, resolvePingSampleCounts } from "@/utils/pingMetrics";
+import { reconcilePingMetricStats, resolvePingChartInterval, resolvePingSampleCounts } from "@/utils/pingMetrics";
 import { usePreferences } from "@/hooks/usePreferences";
 import type { PingRecord, PingTaskStats } from "@/types/komari";
 import type { TimedMetricPoint } from "./chartData";
@@ -111,13 +112,19 @@ export function PingChart({
 }) {
   const {
     data,
+    error,
     isError,
     isFetching,
     isLoading,
     refetch: refetchRecords,
   } = usePingRecords(uuid, hours, active);
-  // stats 随 records 同一次请求返回(getPingRecords includeStats),不再单独发起查询。
-  const pingStats = data?.stats ?? EMPTY_PING_STATS;
+  const auxiliaryEnabled = active && Boolean(uuid);
+  const { data: serverStats, refetch: refetchStats } = usePingRecordStats(uuid, hours, auxiliaryEnabled);
+  const { data: publicTasks, refetch: refetchTasks } = usePublicPingTasks(auxiliaryEnabled && Boolean(data?.records.length));
+  const pingStats = useMemo(
+    () => reconcilePingMetricStats(serverStats ?? data?.stats ?? EMPTY_PING_STATS, data?.records ?? []),
+    [data, serverStats],
+  );
   const { resolvedAppearance } = usePreferences();
   const { w, h, ref: chartSizeRef } = useResponsiveChartSize("wide");
   const [hiddenTasks, setHiddenTasks] = useState<Set<number>>(new Set());
@@ -132,8 +139,20 @@ export function PingChart({
     time: "",
   });
   const isDark = resolvedAppearance === "dark";
-  // API 顺序与后台任务权重一致，响应本身不一定包含可重排的权重。
-  const tasks = useMemo(() => [...(data?.tasks ?? [])], [data]);
+  // 补齐名称时保留曲线里的任务顺序，避免线路颜色跳变。
+  const tasks = useMemo(() => {
+    const publicById = new Map(publicTasks?.map((task) => [task.id, task] as const));
+    const statsById = new Map(pingStats.map((stat) => [stat.taskId, stat] as const));
+    return (data?.tasks ?? []).map((task) => {
+      const publicTask = publicById.get(task.id);
+      const stat = statsById.get(task.id);
+      return publicTask ?? {
+        ...task,
+        name: stat?.name || task.name,
+        interval: stat?.interval || task.interval,
+      };
+    });
+  }, [data?.tasks, pingStats, publicTasks]);
   const taskLabels = useMemo(() => {
     const counts = new Map<string, number>();
     for (const task of tasks) {
@@ -442,6 +461,10 @@ export function PingChart({
 
   const refetchAll = () => {
     void refetchRecords();
+    if (auxiliaryEnabled) {
+      void refetchStats();
+      if (data?.records.length) void refetchTasks();
+    }
   };
 
   const toggleTask = (taskId: number) => {
@@ -465,7 +488,7 @@ export function PingChart({
     return (
       <InstancePanel title="Ping 图表">
         <div className="instance-empty">
-          <span>延迟历史加载失败</span>
+          <span>{historyRequestErrorMessage(error, "延迟历史加载失败")}</span>
           <button
             type="button"
             className="instance-toggle-button"

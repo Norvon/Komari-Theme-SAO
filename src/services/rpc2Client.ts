@@ -1,4 +1,5 @@
-import { fetchWithTimeout } from "@/utils/abort";
+import { withTimeoutSignal } from "@/utils/abort";
+import { HttpRequestError } from "@/services/requestErrors";
 
 type JsonRpcId = number | string;
 
@@ -78,22 +79,32 @@ class RPC2Client {
     params?: TParams,
     options: RpcCallOptions = {},
   ): Promise<TResult> {
-    if (this.state === "disconnected") {
-      this.autoConnect();
-    }
+    const timeout = options.timeout ?? DEFAULT_TIMEOUT_MS;
+    if (timeout <= 0) throw new DOMException("Request timed out", "TimeoutError");
+    const deadline = Date.now() + timeout;
+    // WS 与 HTTP 共用截止时间，回退不能重新领取一份超时预算。
+    return await withTimeoutSignal(async (signal) => {
+      if (signal.aborted) throw signal.reason;
+      if (this.state === "disconnected") this.autoConnect();
 
-    if (this.state === "connected") {
-      try {
-        return await this.callViaWebSocket<TParams, TResult>(method, params, options);
-      } catch (error) {
-        // 服务端已拒绝的 RPC 不能再用 HTTP 重试。
-        if (error instanceof RpcResponseError) throw error;
-        if (options.signal?.aborted) throw error;
-        return await this.callViaHttp<TParams, TResult>(method, params, options);
+      if (this.state === "connected") {
+        try {
+          return await this.callViaWebSocket<TParams, TResult>(method, params, {
+            signal,
+            timeout: Math.max(0, deadline - Date.now()),
+          });
+        } catch (error) {
+          if (error instanceof RpcResponseError || signal.aborted) throw error;
+        }
       }
-    }
 
-    return await this.callViaHttp<TParams, TResult>(method, params, options);
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) throw new DOMException("Request timed out", "TimeoutError");
+      return await this.callViaHttp<TParams, TResult>(method, params, {
+        signal,
+        timeout: remaining,
+      });
+    }, timeout, options.signal);
   }
 
   private autoConnect() {
@@ -261,7 +272,7 @@ class RPC2Client {
       const timeout = window.setTimeout(() => {
         cleanup();
         this.pending.delete(id);
-        reject(new Error(`RPC2 request timed out: ${method}`));
+        reject(new DOMException(`RPC2 request timed out: ${method}`, "TimeoutError"));
       }, timeoutMs);
 
       const onAbort = () => {
@@ -305,12 +316,12 @@ class RPC2Client {
     options: RpcCallOptions = {},
   ): Promise<TResult> {
     const id = ++this.requestId;
-    const timeoutMs = options.timeout ?? DEFAULT_TIMEOUT_MS;
-    const response = await fetchWithTimeout(
+    const response = await fetch(
       this.baseUrl,
       {
         method: "POST",
         credentials: "include",
+        signal: options.signal,
         headers: {
           Accept: "application/json",
           "Content-Type": "application/json",
@@ -322,12 +333,14 @@ class RPC2Client {
           params,
         } satisfies JsonRpcRequest<TParams>),
       },
-      timeoutMs,
-      options.signal,
     );
 
     if (!response.ok) {
-      throw new Error(`Request ${this.baseUrl} failed: ${response.status}`);
+      throw new HttpRequestError(
+        `RPC ${method} failed: HTTP ${response.status}`,
+        response.status,
+        this.baseUrl,
+      );
     }
 
     const payload = (await response.json()) as JsonRpcResponse<TResult>;

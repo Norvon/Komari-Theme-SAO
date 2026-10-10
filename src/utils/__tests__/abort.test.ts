@@ -135,6 +135,18 @@ describe("fetchWithTimeout", () => {
 });
 
 describe("withTimeoutSignal", () => {
+  it("distinguishes timeout from navigation cancellation", async () => {
+    vi.useFakeTimers();
+    const pending = withTimeoutSignal((signal) => new Promise<unknown>((_resolve, reject) => {
+      signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+    }), 100).catch((error) => error);
+
+    await vi.advanceTimersByTimeAsync(100);
+
+    expect(await pending).toMatchObject({ name: "TimeoutError" });
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it("cleans its timer as soon as the operation settles", async () => {
     vi.useFakeTimers();
 

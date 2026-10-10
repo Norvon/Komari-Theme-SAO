@@ -34,7 +34,9 @@ function createTimeoutSignal(
   } else {
     timer = globalThis.setTimeout(() => {
       cleanup();
-      if (!controller.signal.aborted) controller.abort();
+      if (!controller.signal.aborted) {
+        controller.abort(new DOMException("Request timed out", "TimeoutError"));
+      }
     }, delay);
     for (const upstream of upstreams) {
       upstream.addEventListener("abort", onUpstreamAbort, { once: true });

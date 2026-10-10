@@ -1,0 +1,84 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { renderToStaticMarkup } from "react-dom/server";
+import { HttpRequestError } from "@/services/requestErrors";
+
+const { recordsMock, statsMock, tasksMock } = vi.hoisted(() => ({
+  recordsMock: vi.fn(), statsMock: vi.fn(), tasksMock: vi.fn(),
+}));
+
+vi.mock("@/hooks/useRecords", () => ({
+  usePingRecords: recordsMock, usePingRecordStats: statsMock, usePublicPingTasks: tasksMock,
+}));
+vi.mock("@/hooks/usePreferences", () => ({
+  usePreferences: () => ({ resolvedAppearance: "dark" }),
+}));
+vi.mock("uplot-react", () => ({ default: () => <div data-chart="ready" /> }));
+vi.mock("@/components/instance/chartShared", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/components/instance/chartShared")>(),
+  useResponsiveChartSize: () => ({ w: 800, h: 300, ref: { current: null } }),
+}));
+
+import { PingChart } from "@/components/instance/PingChart";
+
+const task = {
+  id: 7, name: "任务 #7", interval: 60, clients: ["node-a"],
+  loss: 0, type: "icmp", target: "", weight: 7,
+};
+const data = {
+  count: 1, tasks: [task], records: [{
+    task_id: 7, client: "node-a", time: "2026-10-10T00:30:00Z", value: 20,
+  }],
+};
+
+describe("Ping progressive rendering", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    recordsMock.mockReturnValue({ data, isError: false, isLoading: false, isFetching: false, refetch: vi.fn() });
+    statsMock.mockReturnValue({ data: undefined, isFetching: true, refetch: vi.fn() });
+    tasksMock.mockReturnValue({ data: undefined, isFetching: true, refetch: vi.fn() });
+  });
+
+  it("renders the ready curve while stats and names are pending or failed", () => {
+    const pending = renderToStaticMarkup(<PingChart uuid="node-a" hours={1} />);
+    expect(pending).toContain('data-chart="ready"');
+    expect(pending).toContain("任务 #7");
+    expect(pending).not.toContain("加载中");
+
+    statsMock.mockReturnValue({ data: undefined, isError: true, refetch: vi.fn() });
+    tasksMock.mockReturnValue({ data: undefined, isError: true, refetch: vi.fn() });
+    expect(renderToStaticMarkup(<PingChart uuid="node-a" hours={1} />)).toContain('data-chart="ready"');
+  });
+
+  it("enriches only observed tasks when the public names arrive", () => {
+    tasksMock.mockReturnValue({ data: [
+      { ...task, name: "真实任务名" }, { ...task, id: 99, name: "其他线路" },
+    ], refetch: vi.fn() });
+
+    const markup = renderToStaticMarkup(<PingChart uuid="node-a" hours={1} />);
+
+    expect(markup).toContain("真实任务名");
+    expect(markup).not.toContain("其他线路");
+  });
+
+  it("shows a login prompt for denied curve requests", () => {
+    recordsMock.mockReturnValue({
+      data: undefined, isError: true, isLoading: false, isFetching: false,
+      error: new HttpRequestError("denied", 401, "/api/rpc2"), refetch: vi.fn(),
+    });
+
+    expect(renderToStaticMarkup(<PingChart uuid="node-a" hours={1} />)).toContain("重新登录");
+  });
+
+  it("keeps an existing curve when refreshing the same range fails", () => {
+    recordsMock.mockReturnValue({
+      data, isError: true, isLoading: false, isFetching: false,
+      error: new DOMException("expired", "TimeoutError"), refetch: vi.fn(),
+    });
+
+    const markup = renderToStaticMarkup(<PingChart uuid="node-a" hours={1} />);
+
+    expect(markup).toContain('data-chart="ready"');
+    expect(markup).toContain("刷新失败，重试");
+  });
+
+});
