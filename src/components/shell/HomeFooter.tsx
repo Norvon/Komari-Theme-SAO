@@ -22,7 +22,7 @@ export function HomeFooter() {
 
         {/* GitHub 交互链接 */}
         <a
-          href="https://github.com/WAOR/Komari-Theme-SAO"
+          href="https://github.com/Norvon/Komari-Theme-SAO"
           target="_blank"
           rel="noopener noreferrer"
           className="home-footer-github"

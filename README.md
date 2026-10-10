@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/WAOR/Komari-Theme-SAO">🌸 Komari 端</a> &nbsp;|&nbsp; 
+  <a href="https://github.com/Norvon/Komari-Theme-SAO">🌸 Komari 端</a> &nbsp;|&nbsp;
   <a href="https://github.com/WAOR/CFSM-SAO">☁️ CFSM 端</a> &nbsp;|&nbsp; 
   <a href="https://github.com/WAOR/Monitor-SAO">⚡ 极简探针端</a>
 </p>
@@ -21,6 +21,8 @@
 ---
 
 ## ⚡ 核心功能与工业美学
+
+本仓库为 Komari-Theme-SAO-N 分支，独立维护版本号；仓库与测试包以 [Norvon/Komari-Theme-SAO](https://github.com/Norvon/Komari-Theme-SAO) 为准。
 
 ### 🚀 极致性能与首屏架构
 * **数据并行预取**：HTML `<head>` 阶段提前并行请求，彻底消除单页应用串行阻塞；
@@ -100,13 +102,13 @@
 | **资产与费用隐蔽保护** | ✅ 支持 | ✅ 支持 | ✅ 支持 |
 | **节点标签系统** | 🏷️ 支持指定 Radix 色彩 (`标签<颜色>`) | 🏷️ 支持指定 Radix 色彩 (`标签-颜色`) | ⏳ 待后端开放接口 |
 | **部署方式** | 主题商店搜索一键安装 / 上传 ZIP | 主题商店搜索一键启用 / 仓库地址安装 | 填入仓库地址一键安装 / 上传压缩包 |
-| **项目地址** | [Komari-Theme-SAO](https://github.com/WAOR/Komari-Theme-SAO) | [CFSM-SAO](https://github.com/WAOR/CFSM-SAO) | [Monitor-SAO](https://github.com/WAOR/Monitor-SAO) |
+| **项目地址** | [Komari-Theme-SAO-N](https://github.com/Norvon/Komari-Theme-SAO) | [CFSM-SAO](https://github.com/WAOR/CFSM-SAO) | [Monitor-SAO](https://github.com/WAOR/Monitor-SAO) |
 
 ---
 
 ## 🏷️ 多端版本号规范与维护机制
 
-**SAO 探针主题家族**目前涵盖 [Komari-Theme-SAO](https://github.com/WAOR/Komari-Theme-SAO)、[CFSM-SAO](https://github.com/WAOR/CFSM-SAO) 与 [Monitor-SAO](https://github.com/WAOR/Monitor-SAO) 三个版本。为兼顾**跨端核心功能演进的一致性**与**单一探针平台差异化适配的灵活性**，三端主题版本号遵循以下维护约定：
+**上游 SAO 探针主题家族**目前涵盖 [Komari-Theme-SAO](https://github.com/WAOR/Komari-Theme-SAO)、[CFSM-SAO](https://github.com/WAOR/CFSM-SAO) 与 [Monitor-SAO](https://github.com/WAOR/Monitor-SAO) 三个版本。为兼顾**跨端核心功能演进的一致性**与**单一探针平台差异化适配的灵活性**，三端主题版本号遵循以下维护约定：
 
 ```text
 v 主版本 . 次版本 . 修订版本  (例: v1.1.5)
@@ -131,7 +133,7 @@ SAO 主题已上架三端各自的主题生态，均提供便捷的一键安装�
 * **方式一：主题商店一键安装（推荐）**  
   进入 Komari 管理后台「主题商店」，搜索 **SAO** 点击安装并启用。
 * **方式二：手动上传安装包**  
-  前往 [Komari-Theme-SAO Releases](https://github.com/WAOR/Komari-Theme-SAO/releases) 下载主题压缩包，在后台主题管理中上传启用。
+  前往 [Komari-Theme-SAO-N Releases](https://github.com/Norvon/Komari-Theme-SAO/releases) 下载主题压缩包，在后台主题管理中上传启用。
 
 ### ⚡ 极简探针端 (Monitor-Probe)
 * **方式一：仓库地址一键安装（推荐）**  
