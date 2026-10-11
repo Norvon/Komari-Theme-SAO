@@ -22,8 +22,8 @@ import {
   parseTags,
 } from "@/utils/format";
 import {
-  latencyHeatColor,
-  lossHeatColor,
+  resolveCustomLatencyColor,
+  resolveCustomLossColor,
   trafficUsageColor,
 } from "@/utils/metricTone";
 import { resolveTrafficUsage, trafficTypeLabel, type TrafficDisplay } from "@/utils/traffic";
@@ -59,6 +59,10 @@ export function useNodeCardModel(
     homepagePingBindings,
     enableHomepageMultiPing,
     homepageMultiPingTaskIds,
+    pingLatencyThresholds,
+    pingLatencyColors,
+    pingLossThresholds,
+    pingLossColors,
   } = useThemeSettings();
   const { isPriceVisible } = usePriceVisibility();
   const multiPingConfigured =
@@ -171,11 +175,19 @@ export function useNodeCardModel(
     };
   }, [isPriceVisible, meta, now, showCardGroup]);
 
-  // ping 派生的颜色只在 ping item 变化时才变。
+  // ping 派生的颜色只在 ping item 或主题 ping 配置变化时才变。
   const pingModel = useMemo(
     () => ({
-      latencyColor: latencyHeatColor(ping.lastValue),
-      lossColor: lossHeatColor(ping.loss),
+      latencyColor: resolveCustomLatencyColor(
+        ping.lastValue,
+        pingLatencyThresholds,
+        pingLatencyColors,
+      ),
+      lossColor: resolveCustomLossColor(
+        ping.loss,
+        pingLossThresholds,
+        pingLossColors,
+      ),
       hasRealHomepagePingBinding,
       // 保留旧字段供外部模型消费者兼容；它表示真实配置状态。
       hasHomepagePingBinding: hasRealHomepagePingBinding,
@@ -187,7 +199,11 @@ export function useNodeCardModel(
       hasRealHomepagePingBinding,
       ping,
       pingError,
+      pingLatencyColors,
+      pingLatencyThresholds,
       pingLoading,
+      pingLossColors,
+      pingLossThresholds,
       shouldRenderPingBars,
     ],
   );

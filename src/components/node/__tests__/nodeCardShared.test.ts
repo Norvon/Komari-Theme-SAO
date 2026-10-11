@@ -36,6 +36,38 @@ describe("healthBarSlotModel", () => {
     ]);
   });
 
+  it("applies custom latency and loss thresholds and colors when provided", () => {
+    const latencyOptions = {
+      latencyThresholds: { excellent: 30, good: 70, moderate: 120, elevated: 180 },
+      latencyColors: {
+        excellent: "#111111",
+        good: "#222222",
+        moderate: "#333333",
+        elevated: "#444444",
+        critical: "#555555",
+      },
+    };
+    expect(healthBarSlotModel(bucket(25), "latency", latencyOptions).color).toBe("#111111");
+    expect(healthBarSlotModel(bucket(50), "latency", latencyOptions).color).toBe("#222222");
+    expect(healthBarSlotModel(bucket(100), "latency", latencyOptions).color).toBe("#333333");
+    expect(healthBarSlotModel(bucket(150), "latency", latencyOptions).color).toBe("#444444");
+    expect(healthBarSlotModel(bucket(250), "latency", latencyOptions).color).toBe("#555555");
+
+    const lossOptions = {
+      lossThresholds: { low: 2, medium: 8 },
+      lossColors: {
+        zero: "#aaaaaa",
+        low: "#bbbbbb",
+        medium: "#cccccc",
+        high: "#dddddd",
+      },
+    };
+    expect(healthBarSlotModel(bucket(50, 0), "loss", lossOptions).color).toBe("#aaaaaa");
+    expect(healthBarSlotModel(bucket(50, 1.5), "loss", lossOptions).color).toBe("#bbbbbb");
+    expect(healthBarSlotModel(bucket(50, 5), "loss", lossOptions).color).toBe("#cccccc");
+    expect(healthBarSlotModel(bucket(50, 20), "loss", lossOptions).color).toBe("#dddddd");
+  });
+
   it("renders missing latency as a short neutral gap", () => {
     expect(healthBarSlotModel(bucket(null, null), "latency")).toMatchObject({
       active: false,

@@ -262,7 +262,7 @@ describe("metric boundary repair in the API adapter", () => {
     expect(rpcCallMock).toHaveBeenCalledWith(
       "common:getRecords",
       expect.objectContaining({ uuid: "node-a", hours: 24, type: "load" }),
-      { signal: undefined, timeout: 8_000 },
+      { signal: expect.any(AbortSignal), timeout: 8_000 },
     );
   });
 

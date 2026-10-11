@@ -1,9 +1,5 @@
 export type HomepagePingTaskBindings = Record<string, string[]>;
 
-/** 多线路模式最多同时展示几条线路，默认上限为 8 条 */
-export const HOMEPAGE_MULTI_PING_MAX_COUNT = 8;
-
-/** 至少选几条才算配置好。1 条即可生效 */
 export const HOMEPAGE_MULTI_PING_MIN_COUNT = 1;
 
 /** 兼容旧版 3 线路常量 */
@@ -25,6 +21,7 @@ function parseTaskId(taskId: string) {
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
+/** 保存和读取共用此函数，不截断线路，避免刷新后丢失已选项。 */
 export function normalizeHomepageMultiPingTaskIds(value: unknown): number[] {
   if (!Array.isArray(value)) return [];
 
@@ -38,7 +35,6 @@ export function normalizeHomepageMultiPingTaskIds(value: unknown): number[] {
           : null;
     if (taskId == null || normalized.includes(taskId)) continue;
     normalized.push(taskId);
-    if (normalized.length === HOMEPAGE_MULTI_PING_MAX_COUNT) break;
   }
   return normalized;
 }

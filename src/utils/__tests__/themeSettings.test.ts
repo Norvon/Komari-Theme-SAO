@@ -102,6 +102,11 @@ describe("normalizeThemeSettings", () => {
   it("normalizes matrixColorTheme correctly", () => {
     expect(normalizeThemeSettings({ matrixColorTheme: "default" }).matrixColorTheme).toBe("default");
     expect(normalizeThemeSettings({ matrixColorTheme: "eva" }).matrixColorTheme).toBe("eva");
+    expect(normalizeThemeSettings({ matrixColorTheme: "cyberpunk" }).matrixColorTheme).toBe("cyberpunk");
+    expect(normalizeThemeSettings({ matrixColorTheme: "divergence" }).matrixColorTheme).toBe("divergence");
+    expect(normalizeThemeSettings({ matrixColorTheme: "matrix-code" as never }).matrixColorTheme).toBe("default");
+    expect(normalizeThemeSettings({ matrixColorTheme: "dual-blades" as never }).matrixColorTheme).toBe("default");
+    expect(normalizeThemeSettings({ matrixColorTheme: "red-comet" as never }).matrixColorTheme).toBe("default");
     expect(normalizeThemeSettings({ matrixColorTheme: "invalid" as never }).matrixColorTheme).toBe("default");
   });
 
@@ -116,6 +121,15 @@ describe("normalizeThemeSettings", () => {
     expect(normalizeThemeSettings({ matrixBootAnimation: true }).matrixBootAnimation).toBe(true);
     expect(normalizeThemeSettings({ matrixBootAnimation: false }).matrixBootAnimation).toBe(false);
     expect(normalizeThemeSettings({}).matrixBootAnimation).toBe(true);
+  });
+
+  it("normalizes matrixBootEffect correctly", () => {
+    expect(normalizeThemeSettings({ matrixBootEffect: "laser-scan" }).matrixBootEffect).toBe("laser-scan");
+    expect(normalizeThemeSettings({ matrixBootEffect: "digital-rain" }).matrixBootEffect).toBe("digital-rain");
+    expect(normalizeThemeSettings({ matrixBootEffect: "cyber-glitch" }).matrixBootEffect).toBe("cyber-glitch");
+    expect(normalizeThemeSettings({ matrixBootEffect: "divergence-flux" }).matrixBootEffect).toBe("divergence-flux");
+    expect(normalizeThemeSettings({ matrixBootEffect: "invalid" as never }).matrixBootEffect).toBe("laser-scan");
+    expect(normalizeThemeSettings({}).matrixBootEffect).toBe("laser-scan");
   });
 
   it("normalizes matrixCustomPattern correctly", () => {
@@ -139,6 +153,115 @@ describe("normalizeThemeSettings", () => {
       name: "设计A",
       indices: [2, 5, 99],
       createdAt: 12345,
+    });
+  });
+
+  it("normalizes ping latency thresholds and colors correctly", () => {
+    const custom = normalizeThemeSettings({
+      pingLatencyThresholds: {
+        excellent: 50,
+        good: 90,
+        moderate: 140,
+        elevated: 180,
+      },
+      pingLatencyColors: {
+        excellent: "#00ff00",
+        good: "#ffff00",
+        moderate: "#ffaa00",
+        elevated: "#ff5500",
+        critical: "#ff0000",
+      },
+    });
+    expect(custom.pingLatencyThresholds).toEqual({
+      excellent: 50,
+      good: 90,
+      moderate: 140,
+      elevated: 180,
+    });
+    expect(custom.pingLatencyColors).toEqual({
+      excellent: "#00ff00",
+      good: "#ffff00",
+      moderate: "#ffaa00",
+      elevated: "#ff5500",
+      critical: "#ff0000",
+    });
+
+    const fallback = normalizeThemeSettings({
+      pingLatencyThresholds: {
+        excellent: -10,
+        good: 20, // should be > excellent
+        moderate: "invalid" as never,
+        elevated: 10,
+      },
+      pingLatencyColors: {
+        excellent: "not-a-color",
+      },
+    });
+    expect(fallback.pingLatencyThresholds.excellent).toBe(60);
+    expect(fallback.pingLatencyColors.excellent).toBe("#10b981");
+  });
+
+  it("normalizes ping loss thresholds and colors correctly", () => {
+    const custom = normalizeThemeSettings({
+      pingLossThresholds: {
+        low: 5,
+        medium: 15,
+      },
+      pingLossColors: {
+        zero: "#00ff00",
+        low: "#ffff00",
+        medium: "#ff8800",
+        high: "#ff0000",
+      },
+    });
+    expect(custom.pingLossThresholds).toEqual({ low: 5, medium: 15 });
+    expect(custom.pingLossColors).toEqual({
+      zero: "#00ff00",
+      low: "#ffff00",
+      medium: "#ff8800",
+      high: "#ff0000",
+    });
+
+    const fallback = normalizeThemeSettings({
+      pingLossThresholds: {
+        low: -5,
+        medium: 200,
+      },
+      pingLossColors: {
+        zero: "invalid",
+      },
+    });
+    expect(fallback.pingLossThresholds.low).toBe(3);
+    expect(fallback.pingLossColors.zero).toBe("#10b981");
+  });
+
+  it("normalizes traffic spectrum colors correctly with presets and fallbacks", () => {
+    const custom = normalizeThemeSettings({
+      trafficSpectrumColors: {
+        start: "#00F0FF",
+        mid: "#E0F542",
+        high: "#FF7700",
+        end: "#EF4444",
+      },
+    });
+    expect(custom.trafficSpectrumColors).toEqual({
+      start: "#00f0ff",
+      mid: "#e0f542",
+      high: "#ff7700",
+      end: "#ef4444",
+    });
+
+    const fallback = normalizeThemeSettings({
+      trafficSpectrumColors: {
+        start: "not-a-color",
+        mid: "123",
+      },
+    });
+    expect(fallback.trafficSpectrumColors).toEqual({
+      start: "#10b981",
+      mid: "#eab308",
+      high: "#f97316",
+      end: "#ef4444",
     });
   });
 });
