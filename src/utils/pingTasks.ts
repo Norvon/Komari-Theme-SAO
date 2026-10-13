@@ -10,6 +10,12 @@ export function isHomepageMultiPingConfigured(taskIds: readonly number[]): boole
   return taskIds.length >= HOMEPAGE_MULTI_PING_MIN_COUNT;
 }
 
+/** 判断是否为无名称时的占位兜底文案，如“任务 #1”或“线路 #1” */
+export function isFallbackTaskName(name?: string | null): boolean {
+  if (!name) return true;
+  return /^(任务|线路)\s*#\d+$/i.test(name.trim());
+}
+
 /** 默认三条线路（1, 2, 3） */
 export const DEFAULT_HOMEPAGE_MULTI_PING_TASK_IDS: readonly number[] = [1, 2, 3];
 

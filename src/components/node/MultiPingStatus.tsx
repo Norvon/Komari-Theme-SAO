@@ -5,6 +5,7 @@ import { usePreferences } from "@/hooks/usePreferences";
 import { useThemeSettings } from "@/hooks/useThemeSettings";
 import type { HomepagePingDisplayLine } from "@/types/komari";
 import { resolveCustomLatencyColor, resolveCustomLossColor } from "@/utils/metricTone";
+import { isFallbackTaskName } from "@/utils/pingTasks";
 import { HealthBucketTooltip } from "./HealthBucketTooltip";
 import { LatencyBars } from "./LatencyBars";
 import { QualityBars } from "./QualityBars";
@@ -75,11 +76,14 @@ const MultiPingMetricRow = memo(function MultiPingMetricRow({
           : metric === "latency"
             ? Math.round(value)
             : value.toFixed(1);
+  const isNameFallback = isFallbackTaskName(line.taskName);
+  const showNameSkeleton = isLoading && isNameFallback;
+  const displayTaskName = showNameSkeleton ? "加载中" : line.taskName;
   return (
     <div
       className="multi-ping-metric-row"
       data-load-state={line.loadState ?? "ready"}
-      title={`${line.taskName} · 延迟 ${latencyLabel} · 丢包 ${lossLabel}${
+      title={`${displayTaskName} · 延迟 ${latencyLabel} · 丢包 ${lossLabel}${
         staleError ? " · 刷新失败，显示上次数据" : ""
       }`}
     >
@@ -90,7 +94,13 @@ const MultiPingMetricRow = memo(function MultiPingMetricRow({
         )}
       >
         {metric === "latency" && (
-          <span className="multi-ping-name">{line.taskName}</span>
+          <span className="multi-ping-name">
+            {showNameSkeleton ? (
+              <span className="multi-ping-name-skeleton" aria-label="加载中" />
+            ) : (
+              line.taskName
+            )}
+          </span>
         )}
         <strong
           className="multi-ping-value tabular"

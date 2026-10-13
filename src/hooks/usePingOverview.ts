@@ -5,8 +5,10 @@ import { useVisibleNodeUuids } from "@/hooks/useNode";
 import { useHiddenNodeUuids } from "@/hooks/useVisibleNodes";
 import { useThemeSettings } from "@/hooks/useThemeSettings";
 import {
+  getCachedPublicPingTasks,
   getPingOverview,
   getPingOverviewStats,
+  getPublicPingTasks,
   prewarmPingOverviewDependencies,
 } from "@/services/api";
 import type {
@@ -15,11 +17,13 @@ import type {
   PingOverviewItem,
   PingOverviewTaskLoadState,
   PingRecord,
+  PingTask,
   PingTaskStats,
 } from "@/types/komari";
 import { withTimeoutSignal } from "@/utils/abort";
 import { resolvePingSampleCounts } from "@/utils/pingMetrics";
 import {
+  isFallbackTaskName,
   isHomepageMultiPingConfigured,
   resolveHomepagePingSelections,
   type HomepagePingTaskBindings,
@@ -357,6 +361,7 @@ export async function buildPingOverviewMap(
   loadOverview: typeof getPingOverview = getPingOverview,
   loadStats?: typeof getPingOverviewStats,
   onProgress?: (result: PingOverviewMapResult) => void,
+  loadTasks?: typeof getPublicPingTasks,
 ): Promise<PingOverviewMapResult> {
   const normalizedUuids = normalizeVisibleUuids(clientUuids);
   if (normalizedUuids.length === 0) {
@@ -408,6 +413,14 @@ export async function buildPingOverviewMap(
 
   const itemsByTask = new Map<number, Map<string, PingOverviewItem>>();
   const taskNames = new Map<number, string>();
+  const cachedTasks = getCachedPublicPingTasks();
+  if (cachedTasks) {
+    for (const task of cachedTasks) {
+      if (task.name && !isFallbackTaskName(task.name)) {
+        taskNames.set(task.id, task.name);
+      }
+    }
+  }
   const successfulTaskIds = new Set<number>();
   const failedTaskIds = new Set<number>();
   const taskStates = new Map<number, PingOverviewTaskLoadState>(
@@ -453,13 +466,22 @@ export async function buildPingOverviewMap(
     const lines = taskIds.map((taskId) => {
       addTaskUuid(multiUuidsByTask, taskId, uuid);
       const previousLine = previousLines?.find((line) => line.taskId === taskId);
+      if (
+        previousLine?.taskName &&
+        !isFallbackTaskName(previousLine.taskName) &&
+        !taskNames.has(taskId)
+      ) {
+        taskNames.set(taskId, previousLine.taskName);
+      }
       const taskState = taskStates.get(taskId) ?? "pending";
       const displayState = taskState === "pending" && previousLine
         ? (previousLine.loadState ?? "ready")
         : taskState;
+      const initialTaskName =
+        taskNames.get(taskId) ?? previousLine?.taskName ?? `任务 #${taskId}`;
       return previousLine
-        ? { ...previousLine, loadState: displayState }
-        : assignedEmptyLine(uuid, taskId, undefined, displayState);
+        ? { ...previousLine, taskName: initialTaskName, loadState: displayState }
+        : assignedEmptyLine(uuid, taskId, initialTaskName, displayState);
     });
     multiLines.set(uuid, lines);
     changedUuids.add(uuid);
@@ -492,14 +514,16 @@ export async function buildPingOverviewMap(
     if (!current) return;
     const taskState = taskStates.get(taskId) ?? "pending";
     const displayState = taskState === "pending" ? (current.loadState ?? "ready") : taskState;
+    const currentName = !isFallbackTaskName(current.taskName) ? current.taskName : undefined;
+    const resolvedName = taskNames.get(taskId) ?? currentName ?? `任务 #${taskId}`;
     const next = successfulTaskIds.has(taskId)
       ? {
           taskId,
-          taskName: taskNames.get(taskId) ?? current.taskName ?? `任务 #${taskId}`,
+          taskName: resolvedName,
           ...(itemsByTask.get(taskId)?.get(uuid) ?? assignedEmptyPing(uuid, "ready")),
           loadState: "ready" as const,
         }
-      : { ...current, loadState: displayState };
+      : { ...current, taskName: resolvedName, loadState: displayState };
     if (equalPingLine(current, next)) return;
     const nextLines = [...lines];
     nextLines[index] = next;
@@ -553,10 +577,12 @@ export async function buildPingOverviewMap(
       stats,
       batchedStats,
     );
-    const taskName =
+    const candidateName =
       tasks.find((task) => task.id === taskId)?.name ||
       effectiveStats.find((stat) => stat.taskId === taskId)?.name;
-    if (taskName) taskNames.set(taskId, taskName);
+    if (candidateName && !isFallbackTaskName(candidateName)) {
+      taskNames.set(taskId, candidateName);
+    }
     itemsByTask.set(
       taskId,
       buildPingOverviewItems(taskId, records, effectiveStats, intervalSeconds),
@@ -593,6 +619,38 @@ export async function buildPingOverviewMap(
         })
         .catch(() => [] as PingTaskStats[])
     : Promise.resolve([] as PingTaskStats[]);
+
+  const batchTasksLoader =
+    loadTasks ?? (loadOverview === getPingOverview ? getPublicPingTasks : null);
+  const batchTasksRequest = batchTasksLoader
+    ? withTimeoutSignal(
+        (requestSignal) =>
+          batchTasksLoader({
+            signal: requestSignal,
+          }),
+        PING_REQUEST_TIMEOUT_MS,
+        signal,
+      )
+        .then((tasks) => {
+          let hasNewName = false;
+          for (const task of tasks) {
+            if (task.name && !isFallbackTaskName(task.name)) {
+              if (taskNames.get(task.id) !== task.name) {
+                taskNames.set(task.id, task.name);
+                hasNewName = true;
+              }
+            }
+          }
+          if (hasNewName) {
+            for (const taskId of selectedTaskIds) {
+              updateTaskOutputs(taskId);
+            }
+            emitProgress();
+          }
+          return tasks;
+        })
+        .catch(() => [] as PingTask[])
+    : Promise.resolve([] as PingTask[]);
 
   // 先提交每个任务的 pending 状态，让首帧和后续轮询都能保留固定的柱状区域；
   // 之后每个任务完成或失败时再按任务更新状态。
@@ -633,7 +691,7 @@ export async function buildPingOverviewMap(
     }),
   );
 
-  await Promise.all([batchStatsRequest, overviewRequest]);
+  await Promise.all([batchTasksRequest, batchStatsRequest, overviewRequest]);
   return buildResult();
 }
 
