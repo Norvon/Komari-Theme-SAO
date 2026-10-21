@@ -7,6 +7,7 @@ import { useThemeSettings } from "@/hooks/useThemeSettings";
 import {
   getPingOverview,
   getPingOverviewStats,
+  getPublicPingTasks,
   prewarmPingOverviewDependencies,
 } from "@/services/api";
 import type {
@@ -357,6 +358,7 @@ export async function buildPingOverviewMap(
   loadOverview: typeof getPingOverview = getPingOverview,
   loadStats?: typeof getPingOverviewStats,
   onProgress?: (result: PingOverviewMapResult) => void,
+  loadTaskNames?: typeof getPublicPingTasks,
 ): Promise<PingOverviewMapResult> {
   const normalizedUuids = normalizeVisibleUuids(clientUuids);
   if (normalizedUuids.length === 0) {
@@ -408,6 +410,8 @@ export async function buildPingOverviewMap(
 
   const itemsByTask = new Map<number, Map<string, PingOverviewItem>>();
   const taskNames = new Map<number, string>();
+  // overview 不再等待公开任务列表，这里单独并行拉取后回填，避免占位名“任务 #N”被当成真名。
+  const publicTaskNames = new Map<number, string>();
   const successfulTaskIds = new Set<number>();
   const failedTaskIds = new Set<number>();
   const taskStates = new Map<number, PingOverviewTaskLoadState>(
@@ -553,9 +557,11 @@ export async function buildPingOverviewMap(
       stats,
       batchedStats,
     );
+    // 接口缺任务列表时 tasks 里是推导出的占位名，只能作为最后兜底。
     const taskName =
-      tasks.find((task) => task.id === taskId)?.name ||
-      effectiveStats.find((stat) => stat.taskId === taskId)?.name;
+      publicTaskNames.get(taskId) ||
+      effectiveStats.find((stat) => stat.taskId === taskId)?.name ||
+      tasks.find((task) => task.id === taskId)?.name;
     if (taskName) taskNames.set(taskId, taskName);
     itemsByTask.set(
       taskId,
@@ -593,6 +599,24 @@ export async function buildPingOverviewMap(
         })
         .catch(() => [] as PingTaskStats[])
     : Promise.resolve([] as PingTaskStats[]);
+
+  const taskNamesLoader =
+    loadTaskNames ?? (loadOverview === getPingOverview ? getPublicPingTasks : null);
+  const taskNamesRequest = taskNamesLoader
+    ? withTimeoutSignal(
+        (requestSignal) => taskNamesLoader({ signal: requestSignal }),
+        PING_REQUEST_TIMEOUT_MS,
+        signal,
+      )
+        .then((publicTasks) => {
+          for (const task of publicTasks) {
+            if (task.name) publicTaskNames.set(task.id, task.name);
+          }
+          rebuildLoadedItems();
+          emitProgress();
+        })
+        .catch(() => undefined)
+    : Promise.resolve();
 
   // 先提交每个任务的 pending 状态，让首帧和后续轮询都能保留固定的柱状区域；
   // 之后每个任务完成或失败时再按任务更新状态。
@@ -633,7 +657,7 @@ export async function buildPingOverviewMap(
     }),
   );
 
-  await Promise.all([batchStatsRequest, overviewRequest]);
+  await Promise.all([batchStatsRequest, overviewRequest, taskNamesRequest]);
   return buildResult();
 }
 

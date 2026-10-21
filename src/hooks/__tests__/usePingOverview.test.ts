@@ -241,6 +241,54 @@ describe("homepage ping polling selection", () => {
     expect(second.multiLines.get("node-a")?.[1]?.taskName).toBe("Task 2");
   });
 
+  it("backfills real task names when the public task list resolves after overview", async () => {
+    let resolveTasks: (tasks: ReturnType<typeof pingOverviewResponse>["tasks"]) => void = () => {};
+    const tasksRequest = new Promise<ReturnType<typeof pingOverviewResponse>["tasks"]>(
+      (resolve) => {
+        resolveTasks = resolve;
+      },
+    );
+    const progressNames: string[][] = [];
+    const pending = buildPingOverviewMap(
+      1,
+      ["node-a"],
+      {},
+      [3, 12],
+      undefined,
+      undefined,
+      async (_hours, taskId) => {
+        const response = pingOverviewResponse(taskId ?? 0, 70);
+        // 模拟公开任务列表缓存未就绪时 API 推导出的占位名。
+        return {
+          ...response,
+          tasks: response.tasks.map((task) => ({ ...task, name: `任务 #${task.id}` })),
+        };
+      },
+      undefined,
+      (next) => {
+        progressNames.push(
+          next.multiLines.get("node-a")?.map((line) => line.taskName) ?? [],
+        );
+      },
+      () => tasksRequest,
+    );
+
+    await vi.waitFor(() => {
+      expect(progressNames.at(-1)).toEqual(["任务 #3", "任务 #12"]);
+    });
+    resolveTasks([
+      ...pingOverviewResponse(3, 0).tasks.map((task) => ({ ...task, name: "zj-移动" })),
+      ...pingOverviewResponse(12, 0).tasks.map((task) => ({ ...task, name: "zj-联通" })),
+    ]);
+    const result = await pending;
+
+    expect(result.multiLines.get("node-a")?.map((line) => line.taskName)).toEqual([
+      "zj-移动",
+      "zj-联通",
+    ]);
+    expect(progressNames.at(-1)).toEqual(["zj-移动", "zj-联通"]);
+  });
+
   it("reports all failed tasks and refuses to persist an empty placeholder result", async () => {
     const progress: string[][] = [];
     const result = await buildPingOverviewMap(
