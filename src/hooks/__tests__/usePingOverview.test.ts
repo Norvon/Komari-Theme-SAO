@@ -519,4 +519,93 @@ describe("homepage ping polling selection", () => {
     expect(requestSignal?.aborted).toBe(true);
     expect(result.singleItems.get("node-a")?.lastValue).toBeNull();
   });
+
+  it("resolves real task names via loadTasks even if overview returns fallback names", async () => {
+    const loadOverview = vi.fn(async (_hours?: number, taskId?: number) => ({
+      records: [{ task_id: taskId ?? 1, time: 1000, value: 50, client: "node-a", loss: 0 }],
+      tasks: [{ id: taskId ?? 1, name: `任务 #${taskId}`, interval: 60, loss: 0, clients: [], type: "icmp" as const, target: "", weight: 1 }],
+      stats: [],
+      intervalSeconds: 60,
+    }));
+    const loadTasks = vi.fn(async () => [
+      { id: 1, name: "西南电信", interval: 60, loss: 0, clients: [], type: "icmp" as const, target: "", weight: 1 },
+      { id: 2, name: "西南联通", interval: 60, loss: 0, clients: [], type: "icmp" as const, target: "", weight: 2 },
+    ]);
+
+    const result = await buildPingOverviewMap(
+      1,
+      ["node-a"],
+      {},
+      [1, 2],
+      undefined,
+      undefined,
+      loadOverview,
+      undefined,
+      undefined,
+      loadTasks,
+    );
+
+    expect(result.multiLines.get("node-a")?.map((l) => l.taskName)).toEqual(["西南电信", "西南联通"]);
+  });
+
+  it("does not overwrite real task names from previous state with fallback names", async () => {
+    const previousResult = await buildPingOverviewMap(
+      1,
+      ["node-a"],
+      {},
+      [1],
+      undefined,
+      undefined,
+      async () => ({
+        records: [{ task_id: 1, time: 1000, value: 50, client: "node-a", loss: 0 }],
+        tasks: [{ id: 1, name: "西南电信", interval: 60, loss: 0, clients: [], type: "icmp" as const, target: "", weight: 1 }],
+        stats: [],
+        intervalSeconds: 60,
+      }),
+    );
+
+    const nextResult = await buildPingOverviewMap(
+      1,
+      ["node-a"],
+      {},
+      [1],
+      undefined,
+      previousResult,
+      async () => ({
+        records: [{ task_id: 1, time: 2000, value: 45, client: "node-a", loss: 0 }],
+        tasks: [{ id: 1, name: "任务 #1", interval: 60, loss: 0, clients: [], type: "icmp" as const, target: "", weight: 1 }],
+        stats: [],
+        intervalSeconds: 60,
+      }),
+      undefined,
+      undefined,
+      async () => [],
+    );
+
+    expect(nextResult.multiLines.get("node-a")?.[0]?.taskName).toBe("西南电信");
+  });
+
+  it("falls back to the stats task name when overview tasks only carry a placeholder", async () => {
+    const result = await buildPingOverviewMap(
+      1,
+      ["node-a"],
+      {},
+      [5],
+      undefined,
+      undefined,
+      async () => ({
+        records: [{ task_id: 5, time: 1000, value: 50, client: "node-a", loss: 0 }],
+        tasks: [{ id: 5, name: "任务 #5", interval: 60, loss: 0, clients: [], type: "icmp" as const, target: "", weight: 5 }],
+        stats: [
+          { client: "node-a", taskId: 5, name: "zj-电信", type: "icmp", interval: 60, total: 1, valid: 1, loss: 0, min: 50, max: 50, avg: 50, latest: 50, p50: 50, p99: 50, stddev: 0, p99P50Ratio: 1 },
+        ],
+        intervalSeconds: 60,
+      }),
+      undefined,
+      undefined,
+      async () => [],
+    );
+
+    expect(result.multiLines.get("node-a")?.[0]?.taskName).toBe("zj-电信");
+  });
 });

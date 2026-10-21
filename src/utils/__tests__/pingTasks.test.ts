@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   assignHomepageMultiPingTask,
   HOMEPAGE_MULTI_PING_MIN_COUNT,
+  isFallbackTaskName,
   isHomepageMultiPingConfigured,
   normalizeHomepageMultiPingTaskIds,
   invertHomepagePingTaskBindings,
@@ -138,5 +139,16 @@ describe("homepage ping task bindings", () => {
     expect(singleSelections.requestedTaskIdsByClient).toBe(
       singleSelections.singleTaskIdsByClient,
     );
+  });
+});
+
+describe("isFallbackTaskName", () => {
+  it("treats empty and generated placeholder names as fallback", () => {
+    expect(isFallbackTaskName(undefined)).toBe(true);
+    expect(isFallbackTaskName("")).toBe(true);
+    expect(isFallbackTaskName("任务 #3")).toBe(true);
+    expect(isFallbackTaskName(" 线路#12 ")).toBe(true);
+    expect(isFallbackTaskName("zj-移动")).toBe(false);
+    expect(isFallbackTaskName("任务 #3 备用")).toBe(false);
   });
 });

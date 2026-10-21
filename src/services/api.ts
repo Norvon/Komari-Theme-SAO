@@ -476,7 +476,27 @@ function normalizeRpcPingOverview(
 let metricQueryApiAvailable: boolean | null = null;
 let metricQueryProbeRequest: Promise<boolean> | null = null;
 let pingMetricStatsApiAvailable: boolean | null = null;
-let publicPingTasksCache: PingTask[] | null = null;
+const PUBLIC_PING_TASKS_STORAGE_KEY = "komari_public_ping_tasks_cache";
+
+function restorePublicPingTasksFromStorage(): PingTask[] | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(PUBLIC_PING_TASKS_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { savedAt?: unknown; tasks?: unknown };
+    if (typeof parsed?.savedAt !== "number" || Date.now() - parsed.savedAt >= 86_400_000) {
+      return null;
+    }
+    // 本地缓存可能被旧版本或手动改写，按接口同一 schema 校验后才使用。
+    const tasks = parseArrayLenient(PingTaskSchema, parsed.tasks) as PingTask[];
+    return tasks.length > 0 ? tasks : null;
+  } catch {
+    return null;
+  }
+}
+
+let publicPingTasksCache: PingTask[] | null = restorePublicPingTasksFromStorage();
+// 设为 0 确保页面挂载时一定会异步向后端拉取最新任务列表进行校验与更新（SWR 模式）
 let publicPingTasksCachedAt = 0;
 let publicPingTasksRequest: Promise<PingTask[]> | null = null;
 
@@ -681,6 +701,14 @@ function loadPublicPingTasks() {
       if (parsed.length > 0) {
         publicPingTasksCache = parsed;
         publicPingTasksCachedAt = Date.now();
+        try {
+          window.localStorage.setItem(
+            PUBLIC_PING_TASKS_STORAGE_KEY,
+            JSON.stringify({ savedAt: Date.now(), tasks: parsed }),
+          );
+        } catch {
+          // 存储不可用时仅失去跨刷新缓存，不影响本次名称。
+        }
       } else {
         publicPingTasksCache = null;
         publicPingTasksCachedAt = 0;
@@ -700,6 +728,10 @@ export function getPublicPingTasks(options?: ApiCallOptions): Promise<PingTask[]
     options?.signal,
     options?.timeout ?? HISTORY_REQUEST_TIMEOUT_MS,
   );
+}
+
+export function getCachedPublicPingTasks(): PingTask[] | null {
+  return publicPingTasksCache;
 }
 
 export function prewarmPingOverviewDependencies() {

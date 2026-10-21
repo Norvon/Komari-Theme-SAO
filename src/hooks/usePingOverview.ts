@@ -6,6 +6,7 @@ import { useHiddenNodeUuids } from "@/hooks/useVisibleNodes";
 import { useThemeSettings } from "@/hooks/useThemeSettings";
 import {
   getPingOverview,
+  getCachedPublicPingTasks,
   getPingOverviewStats,
   getPublicPingTasks,
   prewarmPingOverviewDependencies,
@@ -21,6 +22,7 @@ import type {
 import { withTimeoutSignal } from "@/utils/abort";
 import { resolvePingSampleCounts } from "@/utils/pingMetrics";
 import {
+  isFallbackTaskName,
   isHomepageMultiPingConfigured,
   resolveHomepagePingSelections,
   type HomepagePingTaskBindings,
@@ -358,7 +360,7 @@ export async function buildPingOverviewMap(
   loadOverview: typeof getPingOverview = getPingOverview,
   loadStats?: typeof getPingOverviewStats,
   onProgress?: (result: PingOverviewMapResult) => void,
-  loadTaskNames?: typeof getPublicPingTasks,
+  loadTasks?: typeof getPublicPingTasks,
 ): Promise<PingOverviewMapResult> {
   const normalizedUuids = normalizeVisibleUuids(clientUuids);
   if (normalizedUuids.length === 0) {
@@ -409,9 +411,11 @@ export async function buildPingOverviewMap(
   };
 
   const itemsByTask = new Map<number, Map<string, PingOverviewItem>>();
+  // 只存真实名称；占位名“任务 #N”不进表，避免冷启动时覆盖缓存或上一轮的真名。
   const taskNames = new Map<number, string>();
-  // overview 不再等待公开任务列表，这里单独并行拉取后回填，避免占位名“任务 #N”被当成真名。
-  const publicTaskNames = new Map<number, string>();
+  for (const task of getCachedPublicPingTasks() ?? []) {
+    if (!isFallbackTaskName(task.name)) taskNames.set(task.id, task.name);
+  }
   const successfulTaskIds = new Set<number>();
   const failedTaskIds = new Set<number>();
   const taskStates = new Map<number, PingOverviewTaskLoadState>(
@@ -457,13 +461,22 @@ export async function buildPingOverviewMap(
     const lines = taskIds.map((taskId) => {
       addTaskUuid(multiUuidsByTask, taskId, uuid);
       const previousLine = previousLines?.find((line) => line.taskId === taskId);
+      if (
+        previousLine &&
+        !isFallbackTaskName(previousLine.taskName) &&
+        !taskNames.has(taskId)
+      ) {
+        taskNames.set(taskId, previousLine.taskName);
+      }
       const taskState = taskStates.get(taskId) ?? "pending";
       const displayState = taskState === "pending" && previousLine
         ? (previousLine.loadState ?? "ready")
         : taskState;
+      const initialTaskName =
+        taskNames.get(taskId) ?? previousLine?.taskName ?? `任务 #${taskId}`;
       return previousLine
-        ? { ...previousLine, loadState: displayState }
-        : assignedEmptyLine(uuid, taskId, undefined, displayState);
+        ? { ...previousLine, taskName: initialTaskName, loadState: displayState }
+        : assignedEmptyLine(uuid, taskId, initialTaskName, displayState);
     });
     multiLines.set(uuid, lines);
     changedUuids.add(uuid);
@@ -496,14 +509,16 @@ export async function buildPingOverviewMap(
     if (!current) return;
     const taskState = taskStates.get(taskId) ?? "pending";
     const displayState = taskState === "pending" ? (current.loadState ?? "ready") : taskState;
+    const currentName = isFallbackTaskName(current.taskName) ? undefined : current.taskName;
+    const resolvedName = taskNames.get(taskId) ?? currentName ?? `任务 #${taskId}`;
     const next = successfulTaskIds.has(taskId)
       ? {
           taskId,
-          taskName: taskNames.get(taskId) ?? current.taskName ?? `任务 #${taskId}`,
+          taskName: resolvedName,
           ...(itemsByTask.get(taskId)?.get(uuid) ?? assignedEmptyPing(uuid, "ready")),
           loadState: "ready" as const,
         }
-      : { ...current, loadState: displayState };
+      : { ...current, taskName: resolvedName, loadState: displayState };
     if (equalPingLine(current, next)) return;
     const nextLines = [...lines];
     nextLines[index] = next;
@@ -557,11 +572,11 @@ export async function buildPingOverviewMap(
       stats,
       batchedStats,
     );
-    // 接口缺任务列表时 tasks 里是推导出的占位名，只能作为最后兜底。
-    const taskName =
-      publicTaskNames.get(taskId) ||
-      effectiveStats.find((stat) => stat.taskId === taskId)?.name ||
-      tasks.find((task) => task.id === taskId)?.name;
+    // 接口缺任务列表时 tasks 里是推导出的占位名，需跳过它再看统计接口的名称。
+    const taskName = [
+      tasks.find((task) => task.id === taskId)?.name,
+      effectiveStats.find((stat) => stat.taskId === taskId)?.name,
+    ].find((name): name is string => !isFallbackTaskName(name));
     if (taskName) taskNames.set(taskId, taskName);
     itemsByTask.set(
       taskId,
@@ -600,20 +615,26 @@ export async function buildPingOverviewMap(
         .catch(() => [] as PingTaskStats[])
     : Promise.resolve([] as PingTaskStats[]);
 
-  const taskNamesLoader =
-    loadTaskNames ?? (loadOverview === getPingOverview ? getPublicPingTasks : null);
-  const taskNamesRequest = taskNamesLoader
+  // overview 不再等待公开任务列表，这里并行拉取，返回后只回填名称。
+  const batchTasksLoader =
+    loadTasks ?? (loadOverview === getPingOverview ? getPublicPingTasks : null);
+  const batchTasksRequest = batchTasksLoader
     ? withTimeoutSignal(
-        (requestSignal) => taskNamesLoader({ signal: requestSignal }),
+        (requestSignal) => batchTasksLoader({ signal: requestSignal }),
         PING_REQUEST_TIMEOUT_MS,
         signal,
       )
         .then((publicTasks) => {
+          let hasNewName = false;
           for (const task of publicTasks) {
-            if (task.name) publicTaskNames.set(task.id, task.name);
+            if (isFallbackTaskName(task.name) || taskNames.get(task.id) === task.name) continue;
+            taskNames.set(task.id, task.name);
+            hasNewName = true;
           }
-          rebuildLoadedItems();
-          emitProgress();
+          if (hasNewName) {
+            for (const taskId of selectedTaskIds) updateTaskOutputs(taskId);
+            emitProgress();
+          }
         })
         .catch(() => undefined)
     : Promise.resolve();
@@ -657,7 +678,7 @@ export async function buildPingOverviewMap(
     }),
   );
 
-  await Promise.all([batchStatsRequest, overviewRequest, taskNamesRequest]);
+  await Promise.all([batchTasksRequest, batchStatsRequest, overviewRequest]);
   return buildResult();
 }
 

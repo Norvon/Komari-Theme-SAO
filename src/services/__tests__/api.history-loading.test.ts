@@ -227,4 +227,29 @@ describe("history loading critical path", () => {
     expect(curve.records).toHaveLength(1);
     expect(vi.getTimerCount()).toBe(0);
   });
+
+  it("restores public task names from storage and rejects malformed cache", async () => {
+    const store = new Map<string, string>();
+    const localStorage = {
+      getItem: (key: string) => store.get(key) ?? null,
+      setItem: (key: string, value: string) => void store.set(key, value),
+    };
+    vi.stubGlobal("window", { localStorage });
+
+    store.set("komari_public_ping_tasks_cache", JSON.stringify({ savedAt: Date.now(), tasks: [{ id: 7 }, { name: "bad" }] }));
+    vi.resetModules();
+    api = await import("@/services/api");
+    // 缺 name 的任务按 schema 默认为空串，不会被当成真名；缺 id 的条目直接丢弃。
+    expect(api.getCachedPublicPingTasks()).toMatchObject([{ id: 7, name: "" }]);
+
+    store.set("komari_public_ping_tasks_cache", JSON.stringify({ savedAt: Date.now(), tasks: [{ id: 7, name: "zj-移动" }] }));
+    vi.resetModules();
+    api = await import("@/services/api");
+    expect(api.getCachedPublicPingTasks()?.[0]?.name).toBe("zj-移动");
+
+    store.set("komari_public_ping_tasks_cache", JSON.stringify({ savedAt: Date.now() - 86_400_001, tasks: [{ id: 7, name: "过期" }] }));
+    vi.resetModules();
+    api = await import("@/services/api");
+    expect(api.getCachedPublicPingTasks()).toBeNull();
+  });
 });

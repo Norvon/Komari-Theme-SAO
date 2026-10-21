@@ -10,6 +10,7 @@ import {
 } from "@/hooks/usePingOverview";
 import { useThemeSettings } from "@/hooks/useThemeSettings";
 import { usePriceVisibility } from "@/hooks/usePriceVisibility";
+import { getCachedPublicPingTasks } from "@/services/api";
 import type { HomepagePingDisplayLine, HomepagePingLine } from "@/types/komari";
 import { formatCompactRenewalPrice, formatRenewalPrice } from "@/utils/billing";
 import { getExpireTextColor } from "@/utils/expireStatus";
@@ -30,6 +31,7 @@ import { resolveTrafficUsage, trafficTypeLabel, type TrafficDisplay } from "@/ut
 import { resolveOsInfo } from "@/components/ui/OsLogo";
 import {
   hasHomepagePingTaskBinding,
+  isFallbackTaskName,
   isHomepageMultiPingConfigured,
 } from "@/utils/pingTasks";
 
@@ -113,18 +115,29 @@ export function useNodeCardModel(
     }
     return homepageMultiPingTaskIds.map((taskId) => {
       const loaded = realPingLines.find((line) => line.taskId === taskId);
-      const line: HomepagePingLine =
-        loaded ?? {
-          taskId,
-          taskName: `任务 #${taskId}`,
-          client: uuid,
-          isAssigned: true,
-          loadState: "pending",
-          lastValue: null,
-          samples: [],
-          max: 1,
-          loss: null,
-        };
+      // Store 还没有真名时先用公开任务缓存，避免首帧闪出“任务 #N”。
+      const cachedName = getCachedPublicPingTasks()?.find((task) => task.id === taskId)?.name;
+      const initialTaskName =
+        loaded && !isFallbackTaskName(loaded.taskName)
+          ? loaded.taskName
+          : (!isFallbackTaskName(cachedName) ? cachedName : undefined) ??
+            loaded?.taskName ??
+            `任务 #${taskId}`;
+      const line: HomepagePingLine = loaded
+        ? loaded.taskName === initialTaskName
+          ? loaded
+          : { ...loaded, taskName: initialTaskName }
+        : {
+            taskId,
+            taskName: initialTaskName,
+            client: uuid,
+            isAssigned: true,
+            loadState: "pending",
+            lastValue: null,
+            samples: [],
+            max: 1,
+            loss: null,
+          };
       return {
         ...line,
         buckets: buildPingBuckets(line, pingBucketCount, bucketNow),
