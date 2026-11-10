@@ -117,7 +117,7 @@ describe("getExpireDaysRemaining / formatExpireDays", () => {
   it("treats Komari 'no expiry' sentinels as no-expiry, not as 已过期", () => {
     // 防回归:Go 零值时间和数字 0 / -1 这些哨兵值以前会被解析成 1 年 / 2000 / 2001 年,
     // 把永不过期的节点显示成"已过期"
-    for (const sentinel of ["0001-01-01T00:00:00Z", "0", "-1", ""]) {
+    for (const sentinel of ["0001-01-01T00:00:00Z", "0001-01-01", "0", "-1", ""]) {
       expect(getExpireDaysRemaining(sentinel)).toBeNull();
       expect(formatExpireDays(sentinel)).toEqual({ value: "—", unit: "", tone: "none" });
     }
@@ -145,10 +145,37 @@ describe("getExpireDaysRemaining / formatExpireDays", () => {
   });
 
   it("handles the today / expired boundary", () => {
-    // 未来约 1 小时会向下取整成剩余 0 天
+    // 同一本地日历日内显示今日到期。
     expect(formatExpireDays(inDays(0, 1))).toEqual({ value: "今日", unit: "", tone: "critical" });
     // 已是过去时间
     expect(formatExpireDays(inDays(-2))).toEqual({ value: "已过期", unit: "", tone: "critical" });
+  });
+
+  it("counts calendar days instead of complete 24-hour periods", () => {
+    const now = new Date(2026, 10, 1, 14, 4, 45).getTime();
+    expect(getExpireDaysRemaining("2026-11-05", now)).toBe(4);
+    expect(getExpireDaysRemaining(new Date(2026, 10, 5).toISOString(), now)).toBe(4);
+    expect(formatExpireDays("2026-11-05", new Date(2026, 10, 5, 14).getTime()))
+      .toEqual({ value: "今日", unit: "", tone: "critical" });
+    expect(getExpireDaysRemaining("2026-11-05", new Date(2026, 10, 6).getTime())).toBe(-1);
+  });
+
+  it("parses date-only values locally without normalizing invalid dates", () => {
+    expect(resolveExpireTimestamp("2026-11-05")).toBe(new Date(2026, 10, 5).getTime());
+    for (const invalid of ["2026-02-30", "2026-13-01", "2026-00-01", "2026-11-00"]) {
+      expect(resolveExpireTimestamp(invalid)).toBeNull();
+    }
+    expect(resolveExpireTimestamp("2028-02-29")).toBe(new Date(2028, 1, 29).getTime());
+  });
+
+  it("keeps calendar days stable across daylight saving transitions", () => {
+    expect(getExpireDaysRemaining("2026-03-09", new Date(2026, 2, 7, 14).getTime())).toBe(2);
+    expect(getExpireDaysRemaining("2026-11-02", new Date(2026, 9, 31, 14).getTime())).toBe(2);
+  });
+
+  it("rejects finite timestamps outside the JavaScript date range", () => {
+    expect(getExpireDaysRemaining(9e15)).toBeNull();
+    expect(getExpireDaysRemaining("2026-11-05", 9e15)).toBeNull();
   });
 });
 

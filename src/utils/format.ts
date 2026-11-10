@@ -131,6 +131,23 @@ export function resolveExpireTimestamp(
     if (n <= 0) return null; // 0 / -1 "无到期" 哨兵值
     return n < 1e12 ? n * 1000 : n; // unix 秒 vs. 毫秒
   }
+  // 纯日期按本地零点解析，避免 Date.parse 的 UTC 口径使到期日跨天。
+  const dateMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw);
+  if (dateMatch) {
+    const year = Number(dateMatch[1]);
+    const month = Number(dateMatch[2]) - 1;
+    const day = Number(dateMatch[3]);
+    const date = new Date(year, month, day);
+    if (
+      date.getFullYear() !== year ||
+      date.getMonth() !== month ||
+      date.getDate() !== day ||
+      date.getTime() <= 0
+    ) {
+      return null;
+    }
+    return date.getTime();
+  }
   const ts = Date.parse(raw);
   if (Number.isNaN(ts) || ts <= 0) return null; // 无法解析或 Go 零时
   return ts;
@@ -142,7 +159,13 @@ export function getExpireDaysRemaining(
 ): number | null {
   const ts = resolveExpireTimestamp(iso);
   if (ts == null || !Number.isFinite(now)) return null;
-  return Math.floor((ts - now) / 86400000);
+  const target = new Date(ts);
+  const current = new Date(now);
+  if (Number.isNaN(target.getTime()) || Number.isNaN(current.getTime())) return null;
+  target.setHours(0, 0, 0, 0);
+  current.setHours(0, 0, 0, 0);
+  // 显示日历天数；四舍五入消除夏令时切换造成的 23/25 小时日偏差。
+  return Math.round((target.getTime() - current.getTime()) / 86400000);
 }
 
 function resolveExpireTone(days: number | null | undefined): ExpireTone {

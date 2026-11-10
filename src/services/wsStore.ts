@@ -613,16 +613,16 @@ function normalizeRealtime(
   };
 }
 
-function applyLatestStatus(records: Record<string, unknown>) {
+function applyLatestStatus(records: Record<string, unknown>, sourceState = state) {
   const touchedMetrics = new Set<string>();
   const touchedTrafficTrends = new Set<string>();
   // 安静 tick 不克隆整个索引。
-  let nextMetricsByUuid = state.metricsByUuid;
-  let nextTrafficTrends = state.trafficTrends;
+  let nextMetricsByUuid = sourceState.metricsByUuid;
+  let nextTrafficTrends = sourceState.trafficTrends;
 
-  for (const uuid of state.order) {
-    const meta = state.metaByUuid[uuid];
-    const prev = state.metricsByUuid[uuid];
+  for (const uuid of sourceState.order) {
+    const meta = sourceState.metaByUuid[uuid];
+    const prev = sourceState.metricsByUuid[uuid];
     if (!meta || !prev) continue;
     const rawRecord = records[uuid];
     const online = resolveOnline(rawRecord);
@@ -632,14 +632,14 @@ function applyLatestStatus(records: Record<string, unknown>) {
       : { ...prev, online };
 
     if (!shallowEqualMetrics(prev, merged)) {
-      if (nextMetricsByUuid === state.metricsByUuid) {
-        nextMetricsByUuid = { ...state.metricsByUuid };
+      if (nextMetricsByUuid === sourceState.metricsByUuid) {
+        nextMetricsByUuid = { ...sourceState.metricsByUuid };
       }
       nextMetricsByUuid[uuid] = merged;
       touchedMetrics.add(uuid);
     }
 
-    const prevTrend = state.trafficTrends[uuid] ?? EMPTY_TRAFFIC_TREND;
+    const prevTrend = sourceState.trafficTrends[uuid] ?? EMPTY_TRAFFIC_TREND;
     const nextUp = updateTrafficTrendSeries(
       prevTrend.up,
       merged.netUp,
@@ -654,8 +654,8 @@ function applyLatestStatus(records: Record<string, unknown>) {
     );
 
     if (nextUp.changed || nextDown.changed) {
-      if (nextTrafficTrends === state.trafficTrends) {
-        nextTrafficTrends = { ...state.trafficTrends };
+      if (nextTrafficTrends === sourceState.trafficTrends) {
+        nextTrafficTrends = { ...sourceState.trafficTrends };
       }
       nextTrafficTrends[uuid] = {
         up: nextUp.series,
@@ -702,6 +702,22 @@ async function performNodeInfoSync() {
     const nodes = sortNodes(await getNodes({ signal: controller.signal }));
     if (controller.signal.aborted) return;
     const order = nodes.map((node) => node.uuid);
+    const initializing = !hydrated;
+    let initialStatus: Record<string, unknown> | null = null;
+    let initialStatusFailed = false;
+    // 首屏沿用 nodeInfoPromise 复用整轮请求，元数据和指标就绪后再一起发布。
+    if (initializing && order.length > 0) {
+      try {
+        initialStatus = await getNodesLatestStatus(order, {
+          timeout: LIVE_STATUS_REQUEST_TIMEOUT_MS,
+          signal: controller.signal,
+        });
+      } catch {
+        // 状态失败仍展示已取到的节点，后续实时轮询继续恢复。
+        initialStatusFailed = true;
+      }
+      if (controller.signal.aborted) return;
+    }
     const touchedMeta = new Set<string>();
     const touchedMetrics = new Set<string>();
     const previousUuids = new Set(state.order);
@@ -740,6 +756,22 @@ async function performNodeInfoSync() {
     const trafficTrends = Object.fromEntries(
       order.map((uuid) => [uuid, state.trafficTrends[uuid] ?? EMPTY_TRAFFIC_TREND]),
     );
+    const nextState: State = {
+      ...state,
+      order,
+      metaByUuid,
+      metricsByUuid,
+      trafficTrends,
+      failureStreak: initializing
+        ? initialStatusFailed ? state.failureStreak + 1 : 0
+        : state.failureStreak,
+    };
+    const applied = initialStatus == null ? null : applyLatestStatus(initialStatus, nextState);
+    if (applied) {
+      nextState.metricsByUuid = applied.nextMetricsByUuid;
+      nextState.trafficTrends = applied.nextTrafficTrends;
+      for (const uuid of applied.touchedMetrics) touchedMetrics.add(uuid);
+    }
 
     const nodeListChanged =
       orderChanged ||
@@ -754,17 +786,11 @@ async function performNodeInfoSync() {
     nodeInfoError = false;
     if (orderChanged || touchedMeta.size > 0 || touchedMetrics.size > 0 || storeStatusChanged) {
       commit(
-        {
-          ...state,
-          order,
-          metaByUuid,
-          metricsByUuid,
-          trafficTrends,
-        },
+        nextState,
         {
           meta: touchedMeta,
           metrics: touchedMetrics,
-          // traffic trend 只由 refreshLatestStatus 改动;syncNodeInfo 原样带过来,这里无需通知。
+          trafficTrends: applied?.touchedTrafficTrends,
           nodeList: nodeListChanged,
           allNodes: orderChanged || touchedMeta.size > 0,
           storeStatus: storeStatusChanged,
@@ -842,7 +868,6 @@ let bootstrapSkipTicks = 0;
 async function bootstrap() {
   try {
     await syncNodeInfo();
-    await refreshLatestStatus();
     bootstrapBackoffTicks = 0;
     bootstrapSkipTicks = 0;
   } catch {
